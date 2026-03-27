@@ -111,7 +111,49 @@
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
   <style>
-    /* ... existing styles ... */
+    /* Phase 2: Interactive Tables */
+    th.sortable { cursor: pointer; user-select: none; position: relative; }
+    th.sortable:hover { background: #e5e7eb; }
+    th.sortable::after { content: '⇅'; margin-left: 4px; opacity: 0.3; font-size: 10px; }
+    th.sortable.asc::after { content: '▲'; opacity: 0.8; }
+    th.sortable.desc::after { content: '▼'; opacity: 0.8; }
+
+    /* Hover-only row actions */
+    .row-actions { opacity: 0; transition: opacity 0.15s ease; }
+    tr:hover .row-actions { opacity: 1; }
+
+    /* Status Pills */
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .pill-open { background: #DBEAFE; color: #1D4ED8; }
+    .pill-win { background: #D1FAE5; color: #047857; }
+    .pill-loss { background: #FEE2E2; color: #B91C1C; }
+
+    /* Expandable child rows */
+    .child-row { background: #F9FAFB; }
+    .child-row td:first-child { padding-left: 28px !important; }
+    .expand-btn { cursor: pointer; transition: transform 0.2s ease; display: inline-block; }
+    .expand-btn.open { transform: rotate(90deg); }
+
+    /* Kanban Drag & Drop */
+    .kanban-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .kanban-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.12); }
+    .kanban-card.dragging { opacity: 0.5; transform: rotate(2deg); }
+    .kanban-col.drag-over { background: #EEF2FF !important; border: 2px dashed #6366F1; }
+
+    /* Phase 3: Progress Bars & Floating UI */
+    .progress-bg { background: #E5E7EB; border-radius: 999px; height: 6px; width: 100%; overflow: hidden; margin-top: 4px; }
+    .progress-bar { height: 100%; border-radius: 999px; transition: width 0.3s ease; }
+    .progress-bar.red { background: #EF4444; }
+    .progress-bar.green { background: #10B981; }
+    
+    .quick-trade-btn { 
+      position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px; 
+      background: #4F46E5; color: white; border-radius: 50%; display: flex; 
+      align-items: center; justify-content: center; box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+      cursor: pointer; transition: transform 0.2s ease, background 0.2s ease; z-index: 40;
+    }
+    .quick-trade-btn:hover { transform: scale(1.05); background: #4338CA; }
+    .quick-trade-btn svg { width: 24px; height: 24px; }
   </style>
 </head>
 
@@ -327,6 +369,17 @@
             <label class="text-sm muted">Date</label>
             <input id="nt-date" type="date" class="w-full border p-2 rounded" />
           </div>
+
+          <!-- DIRECTION TOGGLE -->
+          <div>
+            <label class="text-sm muted">Direction</label>
+            <div class="flex gap-1 mt-1">
+              <button type="button" id="dir-long" class="flex-1 py-2 rounded-l-md text-sm font-semibold bg-green-600 text-white border border-green-600 transition-all" onclick="setDirection('Long')">▲ Long</button>
+              <button type="button" id="dir-short" class="flex-1 py-2 rounded-r-md text-sm font-semibold bg-white text-gray-600 border border-gray-300 transition-all" onclick="setDirection('Short')">▼ Short</button>
+            </div>
+            <input type="hidden" id="nt-direction" value="Long" />
+          </div>
+
           <div><label class="text-sm muted">Entry</label><input id="nt-entry" type="number"
               class="w-full border p-2 rounded" /></div>
           <div><label class="text-sm muted">Exit/SL</label><input id="nt-exit" type="number"
@@ -349,6 +402,43 @@
               <option value="down">Round Down (Conservative)</option>
               <option value="up">Round Up (Aggressive)</option>
             </select>
+          </div>
+        </div>
+
+        <!-- HEDGE SECTION -->
+        <div class="mt-4 border rounded-lg overflow-hidden">
+          <button type="button" id="toggle-hedge" class="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-gray-700 transition-all"
+            onclick="document.getElementById('hedge-fields').classList.toggle('hidden'); this.querySelector('.chevron').classList.toggle('rotate-90')">
+            <span>🛡️ Add Hedge (Option Leg)</span>
+            <span class="chevron transition-transform text-xs">▶</span>
+          </button>
+          <div id="hedge-fields" class="hidden p-4 bg-blue-50/50 border-t grid grid-cols-3 gap-4">
+            <div>
+              <label class="text-sm muted">Hedge Instrument</label>
+              <input id="hedge-instrument" list="inst-list" class="w-full border p-2 rounded bg-white" placeholder="e.g., NIFTY" />
+            </div>
+            <div>
+              <label class="text-sm muted">Hedge Strike</label>
+              <input id="hedge-strike" type="number" class="w-full border p-2 rounded bg-white" />
+            </div>
+            <div>
+              <label class="text-sm muted">Hedge Type</label>
+              <select id="hedge-type" class="w-full border p-2 rounded bg-white">
+                <option value="PE">PE (Put)</option>
+                <option value="CE">CE (Call)</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm muted">Premium Paid</label>
+              <input id="hedge-premium" type="number" class="w-full border p-2 rounded bg-white" placeholder="Price per unit" />
+            </div>
+            <div>
+              <label class="text-sm muted">Hedge Qty</label>
+              <input id="hedge-qty" type="number" class="w-full border p-2 rounded bg-white" />
+            </div>
+            <div class="flex items-end">
+              <div class="text-xs muted">Hedge Risk: <span id="calc-hedge-risk" class="font-bold text-gray-800">—</span></div>
+            </div>
           </div>
         </div>
 
@@ -382,6 +472,10 @@
             <div class="text-xs muted">Total Buy Value</div>
             <div id="calc-totalbuy" class="font-semibold">—</div>
           </div>
+          <div>
+            <div class="text-xs muted">Total Risk (incl. Hedge)</div>
+            <div id="calc-total-risk" class="font-semibold text-red-600">—</div>
+          </div>
         </div>
 
         <div class="mt-3 flex gap-2">
@@ -406,16 +500,18 @@
           <table class="w-full text-sm">
             <thead class="bg-gray-50 sticky top-0">
               <tr>
-                <th>Date</th>
-                <th>System</th>
-                <th>Instrument</th>
-                <th>Type</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>Qty</th>
-                <th>Risk</th>
+                <th class="sortable" data-key="date">Date</th>
+                <th>ID</th>
+                <th class="sortable" data-key="system">System</th>
+                <th class="sortable" data-key="instrument">Instrument</th>
+                <th class="sortable" data-key="direction">Dir</th>
+                <th class="sortable" data-key="entry">Entry</th>
+                <th class="sortable" data-key="exit">Exit</th>
+                <th class="sortable" data-key="final_qty">Qty</th>
+                <th class="sortable" data-key="actual_risk">Risk</th>
                 <th>Flag</th>
                 <th>Tags</th>
+                <th>Status</th>
                 <th></th>
               </tr>
             </thead>
@@ -432,19 +528,19 @@
         </div>
         <div class="flex gap-4 h-[calc(100vh-140px)] overflow-x-auto pb-4">
           <!-- Columns: Watchlist, Pending, Open, Closed -->
-          <div class="w-80 flex-shrink-0 flex flex-col bg-gray-100 rounded-lg max-h-full">
+          <div class="w-80 flex-shrink-0 flex flex-col bg-gray-100 rounded-lg max-h-full kanban-col" data-status="Watchlist">
             <div class="p-3 font-semibold text-gray-600 border-b bg-gray-200 rounded-t-lg">Watchlist / Ideas</div>
             <div id="kanban-watchlist" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
-          <div class="w-80 flex-shrink-0 flex flex-col bg-blue-50 rounded-lg max-h-full">
+          <div class="w-80 flex-shrink-0 flex flex-col bg-blue-50 rounded-lg max-h-full kanban-col" data-status="Open">
             <div class="p-3 font-semibold text-blue-800 border-b bg-blue-100 rounded-t-lg">Open Positions</div>
             <div id="kanban-open" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
-          <div class="w-80 flex-shrink-0 flex flex-col bg-green-50 rounded-lg max-h-full">
+          <div class="w-80 flex-shrink-0 flex flex-col bg-green-50 rounded-lg max-h-full kanban-col" data-status="Wins">
             <div class="p-3 font-semibold text-green-800 border-b bg-green-100 rounded-t-lg">Winners (Closed)</div>
             <div id="kanban-wins" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
-          <div class="w-80 flex-shrink-0 flex flex-col bg-red-50 rounded-lg max-h-full">
+          <div class="w-80 flex-shrink-0 flex flex-col bg-red-50 rounded-lg max-h-full kanban-col" data-status="Losses">
             <div class="p-3 font-semibold text-red-800 border-b bg-red-100 rounded-t-lg">Losses (Closed)</div>
             <div id="kanban-losses" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
@@ -504,19 +600,39 @@
 
       <!-- PNL -->
       <section id="view-pnl" class="tab-view hidden bg-white rounded-card p-4">
-        <h3 class="font-semibold mb-3">PnL & Positions</h3>
-        <div class="mb-4">
-          <h4 class="font-semibold">Open Positions</h4>
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+          <h3 class="font-semibold mb-2 md:mb-0">PnL & Positions</h3>
+          
+          <!-- Robust Filter Bar -->
+          <div class="flex flex-wrap gap-2 text-sm bg-gray-50 p-2 rounded w-full md:w-auto">
+            <input type="text" id="pnl-filter-inst" placeholder="Symbol..." class="border p-1 rounded w-24">
+            <select id="pnl-filter-sys" class="border p-1 rounded w-32"><option value="">All Systems</option></select>
+            <select id="pnl-filter-period" class="border p-1 rounded w-32">
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="ytd">YTD</option>
+            </select>
+            <button id="pnl-filter-btn" class="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">Apply</button>
+            <button id="pnl-filter-clear" class="text-gray-500 hover:text-gray-800 px-2 py-1 text-xs">Clear</button>
+          </div>
+        </div>
+
+        <div class="mb-6">
+          <h4 class="font-semibold text-blue-800 border-b pb-1 mb-2">Open Positions</h4>
           <div class="table-scroll">
             <table class="w-full text-sm">
-              <thead class="bg-gray-50">
+              <thead class="bg-blue-50">
                 <tr>
                   <th>Date</th>
                   <th>Instrument</th>
+                  <th>Dir</th>
                   <th>Entry</th>
                   <th>Qty</th>
                   <th>Mark</th>
                   <th>Unrealized</th>
+                  <th>Risk / Reward</th>
                   <th></th>
                 </tr>
               </thead>
@@ -525,17 +641,20 @@
           </div>
         </div>
         <div>
-          <h4 class="font-semibold">Closed Trades</h4>
+          <h4 class="font-semibold text-gray-800 border-b pb-1 mb-2">Closed Trades</h4>
           <div class="table-scroll">
             <table class="w-full text-sm">
-              <thead class="bg-gray-50">
+              <thead class="bg-gray-100">
                 <tr>
                   <th>Date</th>
                   <th>Inst</th>
+                  <th>Dir</th>
                   <th>Entry</th>
                   <th>Exit</th>
                   <th>Qty</th>
                   <th>Realized</th>
+                  <th>Risk / Reward</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="pnl-closed"></tbody>
@@ -602,6 +721,44 @@
       </section>
 
     </main>
+
+    <!-- FLOATING QUICK TRADE BUTTON -->
+    <div id="btn-quick-trade" class="quick-trade-btn" title="Quick Trade">
+      <i data-feather="plus"></i>
+    </div>
+
+    <!-- CLOSE TRADE MODAL -->
+    <div id="modal-close" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+      <div class="bg-white rounded-lg shadow-xl p-6 w-[400px] max-w-full m-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold text-lg">Close Trade</h3>
+          <button id="btn-modal-close-x" class="text-gray-400 hover:text-gray-600">×</button>
+        </div>
+        <div class="space-y-4">
+          <div class="text-sm text-gray-600 bg-gray-50 p-2 rounded" id="modal-close-info">
+            <!-- Trade Info Injected Here -->
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 mb-1">Close Quantity (Slider)</label>
+            <input type="range" id="modal-close-qty-slider" class="w-full" min="1" max="100" value="100">
+            <div class="flex justify-between text-xs text-gray-500 mt-1">
+              <span>1</span>
+              <span id="modal-close-qty-display" class="font-bold text-gray-900">100</span>
+              <span id="modal-close-qty-max">100</span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 mb-1">Exit Price</label>
+            <input type="number" id="modal-close-price" class="w-full p-2 border rounded" step="0.05" placeholder="0.00">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 mb-1">Exit Date (Optional)</label>
+            <input type="date" id="modal-close-date" class="w-full p-2 border rounded">
+          </div>
+          <button id="btn-modal-submit-close" class="w-full py-2 bg-red-600 text-white font-bold rounded hover:bg-red-700 transition">Confirm Close</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

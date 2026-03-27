@@ -82,7 +82,10 @@ const Calc = {
     const openTrades = trades.filter(t => t.system === sys.name && t.status === 'Open');
     const closedTrades = trades.filter(t => t.system === sys.name && t.status === 'Closed');
     const riskInPlay = openTrades.reduce((a, b) => a + Number(b.actual_risk || 0), 0);
-    const unrealized = openTrades.reduce((a, b) => a + ((Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0)), 0);
+    const unrealized = openTrades.reduce((a, b) => {
+      const dir = (b.direction === 'Short') ? -1 : 1;
+      return a + (dir * (Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0));
+    }, 0);
     const realized = closedTrades.reduce((a, b) => a + Number(b.realized_pnl || 0), 0);
     const maxTrades = sys.capital && sys.R ? Math.floor(sys.capital / sys.R) : 0;
     const openCount = openTrades.length;
@@ -289,7 +292,10 @@ const UI = {
     const totalCapital = systems.reduce((a, b) => a + Number(b.capital || 0), 0);
     const totalRisk = trades.filter(t => t.status === 'Open').reduce((a, b) => a + Number(b.actual_risk || 0), 0);
     const realized = trades.filter(t => t.status === 'Closed').reduce((a, b) => a + Number(b.realized_pnl || 0), 0);
-    const unreal = trades.filter(t => t.status === 'Open').reduce((a, b) => a + ((Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0)), 0);
+    const unreal = trades.filter(t => t.status === 'Open').reduce((a, b) => {
+      const dir = (b.direction === 'Short') ? -1 : 1;
+      return a + (dir * (Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0));
+    }, 0);
 
     if ($('#sum-capital')) $('#sum-capital').textContent = Calc.money(totalCapital);
     if ($('#sum-risk')) $('#sum-risk').textContent = Calc.money(totalRisk);
@@ -302,7 +308,8 @@ const UI = {
     const points = []; let cum = 0;
     const tradesSorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
     tradesSorted.forEach(t => {
-      const pnl = (t.status === 'Closed') ? Number(t.realized_pnl || 0) : ((Number(t.mark_price || 0) - Number(t.entry || 0)) * Number(t.final_qty || 0));
+      const dir = (t.direction === 'Short') ? -1 : 1;
+      const pnl = (t.status === 'Closed') ? Number(t.realized_pnl || 0) : (dir * (Number(t.mark_price || 0) - Number(t.entry || 0)) * Number(t.final_qty || 0));
       cum += pnl;
       points.push({ x: t.date, y: Number((cum / 100000).toFixed(2)) });
     });
@@ -416,42 +423,104 @@ const UI = {
     });
   },
 
+  // Sort state for trades table
+  _tradeSortKey: 'date',
+  _tradeSortDir: 'desc',
+
   renderTrades(editCallback, highlightId = null) {
     const tbody = $('#trades-tbody'); if (!tbody) return;
     tbody.innerHTML = '';
     const filtSys = $('#filter-system') ? $('#filter-system').value.trim() : '';
     const filtInst = $('#filter-instrument') ? $('#filter-instrument').value.trim().toUpperCase() : '';
 
-    // Sort reverse chronological
-    const sorted = [...store.state.trades].sort((a, b) => new Date(b.date) - new Date(a.date));
+    // Setup sortable headers
+    document.querySelectorAll('#view-trades th.sortable').forEach(th => {
+      th.onclick = () => {
+        const key = th.dataset.key;
+        if (UI._tradeSortKey === key) {
+          UI._tradeSortDir = UI._tradeSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          UI._tradeSortKey = key;
+          UI._tradeSortDir = 'asc';
+        }
+        document.querySelectorAll('#view-trades th.sortable').forEach(h => h.classList.remove('asc', 'desc'));
+        th.classList.add(UI._tradeSortDir);
+        UI.renderTrades(editCallback);
+      };
+    });
 
-    sorted.forEach(t => {
-      // HIDE CHILD TRADES
-      if (t.parent_id) return;
+    // Get parent trades only
+    let parents = store.state.trades.filter(t => !t.parent_id);
+    if (filtSys) parents = parents.filter(t => t.system === filtSys);
+    if (filtInst) parents = parents.filter(t => t.instrument.toUpperCase().includes(filtInst) || (t.tags || []).some(tt => tt.toUpperCase().includes(filtInst)));
 
-      if (filtSys && t.system !== filtSys) return;
-      if (filtInst && !(t.instrument.toUpperCase().includes(filtInst) || (t.tags || []).some(tt => tt.toUpperCase().includes(filtInst)))) return;
+    // Sort
+    const key = UI._tradeSortKey;
+    const dir = UI._tradeSortDir === 'asc' ? 1 : -1;
+    parents.sort((a, b) => {
+      let va = a[key], vb = b[key];
+      if (key === 'date') { va = new Date(va); vb = new Date(vb); }
+      else if (['entry', 'exit', 'final_qty', 'actual_risk'].includes(key)) { va = Number(va || 0); vb = Number(vb || 0); }
+      else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
+      return va > vb ? dir : va < vb ? -dir : 0;
+    });
 
+    parents.forEach(t => {
       const tr = document.createElement('tr');
-      // Highlight if matches
+      tr.className = 'border-b hover:bg-gray-50 transition-colors';
       if (highlightId && t.id === highlightId) {
         tr.classList.add('bg-blue-100');
         setTimeout(() => tr.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
       }
 
-      tr.innerHTML = `<td class="p-2">${t.date}</td><td class="text-xs text-gray-400">#${t.id.replace('trade_', '')}</td><td>${t.system}</td><td>${t.instrument}</td><td>${t.optionType || ''}</td>
+      // Status pill
+      let statusPill = '<span class="pill pill-open">OPEN</span>';
+      if (t.status === 'Closed') {
+        statusPill = Number(t.realized_pnl) >= 0 ? '<span class="pill pill-win">WIN</span>' : '<span class="pill pill-loss">LOSS</span>';
+      }
+
+      const dirBadge = t.direction === 'Short' ? '<span class="text-xs font-bold text-red-500 bg-red-50 px-1 rounded">SHORT</span>' : '<span class="text-xs font-bold text-green-600 bg-green-50 px-1 rounded">LONG</span>';
+      const hedgeChip = t.hedge && t.hedge.strike ? `<span class="ml-1 text-xs bg-blue-100 text-blue-700 px-1 rounded">\ud83d\udee1\ufe0f ${t.hedge.strike} ${t.hedge.type}</span>` : '';
+
+      // Check for children (partial exits)
+      const children = store.state.trades.filter(c => c.parent_id === t.id);
+      const expandBtn = children.length > 0 ? `<span class="expand-btn text-gray-400 text-xs mr-1" data-parent="${t.id}">\u25b6</span>` : '<span class="w-3 inline-block mr-1"></span>';
+
+      tr.innerHTML = `<td class="p-2">${expandBtn}${t.date}</td><td class="text-xs text-gray-400">#${t.id.replace('trade_', '')}</td><td>${t.system}</td><td>${t.instrument} ${hedgeChip}</td><td>${dirBadge}</td>
         <td>${t.entry}</td><td>${t.exit}</td><td>${t.final_qty}</td><td>${Calc.money(t.actual_risk)}</td>
-        <td>${t.flag}</td><td>${(t.tags || []).join(', ')}</td>
-        <td><button class="edit-trade text-blue-600">Edit</button> <button class="del-trade text-red-600">Delete</button></td>`;
+        <td>${t.flag}</td><td>${(t.tags || []).join(', ')}</td><td>${statusPill}</td>
+        <td class="row-actions"><button class="edit-trade text-blue-600 hover:text-blue-800 mr-1" title="Edit">\u270f\ufe0f</button><button class="del-trade text-red-500 hover:text-red-700" title="Delete">\ud83d\uddd1\ufe0f</button></td>`;
       tbody.appendChild(tr);
+
       tr.querySelector('.del-trade').addEventListener('click', () => {
-        if (!confirm('Delete?')) return;
+        if (!confirm('Delete this trade and all its partial exits?')) return;
         store.removeTrade(t.id);
         UI.renderTrades(editCallback);
       });
       tr.querySelector('.edit-trade').addEventListener('click', () => {
         if (editCallback) editCallback(t);
       });
+
+      // Expandable child rows
+      const expBtn = tr.querySelector('.expand-btn');
+      if (expBtn && children.length > 0) {
+        const childRows = [];
+        children.forEach(child => {
+          const cr = document.createElement('tr');
+          cr.className = 'child-row hidden border-b text-xs text-gray-500';
+          const childPill = Number(child.realized_pnl) >= 0 ? '<span class="pill pill-win">WIN</span>' : '<span class="pill pill-loss">LOSS</span>';
+          cr.innerHTML = `<td class="p-2 pl-7">${child.close_date || child.date}</td><td class="text-gray-300">#${child.id.replace('trade_', '')}</td><td></td><td>Partial Exit</td><td></td>
+            <td>${child.entry}</td><td>${child.close_price || '\u2014'}</td><td>${child.final_qty}</td><td></td>
+            <td></td><td></td><td>${childPill}</td><td class="font-semibold ${Number(child.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(child.realized_pnl)}</td>`;
+          childRows.push(cr);
+          tbody.appendChild(cr);
+        });
+        expBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          expBtn.classList.toggle('open');
+          childRows.forEach(cr => cr.classList.toggle('hidden'));
+        });
+      }
     });
   },
 
@@ -460,7 +529,31 @@ const UI = {
     const cols = { watchlist: $('#kanban-watchlist'), open: $('#kanban-open'), wins: $('#kanban-wins'), losses: $('#kanban-losses') };
     if (!cols.watchlist) return;
     Object.values(cols).forEach(c => c.innerHTML = '');
+
+    // Setup drag & drop on columns
+    document.querySelectorAll('.kanban-col').forEach(colEl => {
+      colEl.ondragover = (e) => { e.preventDefault(); colEl.classList.add('drag-over'); };
+      colEl.ondragleave = () => colEl.classList.remove('drag-over');
+      colEl.ondrop = (e) => {
+        e.preventDefault();
+        colEl.classList.remove('drag-over');
+        const tradeId = e.dataTransfer.getData('text/plain');
+        const targetStatus = colEl.dataset.status;
+        const trade = store.state.trades.find(x => x.id === tradeId);
+        if (!trade) return;
+        if (targetStatus === 'Open' && trade.status !== 'Open') {
+          trade.status = 'Open';
+          trade.realized_pnl = null;
+          trade.close_price = null;
+          trade.close_date = null;
+          store.save();
+        }
+        UI.renderKanban();
+      };
+    });
+
     trades.forEach(t => {
+      if (t.parent_id) return;
       let col = null;
       if (t.status === 'Open') col = cols.open;
       else if (t.status === 'Closed') {
@@ -468,16 +561,30 @@ const UI = {
         else col = cols.losses;
       } else { col = cols.watchlist; }
       if (!col) return;
+
       const card = document.createElement('div');
       const borderColor = (Number(t.realized_pnl) > 0) ? 'border-l-green-500' : (Number(t.realized_pnl) < 0 ? 'border-l-red-500' : 'border-l-blue-500');
-      card.className = "p-3 bg-white rounded shadow text-sm border-l-4 mb-2 cursor-pointer " + borderColor;
-      const centerContent = t.status === 'Closed' ? `<div class="mt-1 font-bold ${Number(t.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(t.realized_pnl)}</div>` : `<div class="mt-1 text-blue-600">Risk: ${Calc.money(t.actual_risk)}</div>`;
-      card.innerHTML = `<div class="font-bold flex justify-between"><span>${t.instrument}</span> <span class="text-xs text-gray-500 bg-gray-100 px-1 rounded">${t.system}</span></div><div class="mt-1 text-xs text-gray-500">Qty: ${t.final_qty} • ${t.date}</div>${centerContent}`;
+      card.className = "kanban-card p-3 bg-white rounded shadow text-sm border-l-4 mb-2 cursor-pointer " + borderColor;
+      card.draggable = true;
+      card.dataset.tradeId = t.id;
 
-      // Make Kanban card clickable to edit
+      const dirLabel = t.direction === 'Short' ? '<span class="text-xs text-red-500 font-bold">\u25bc SHORT</span>' : '<span class="text-xs text-green-600 font-bold">\u25b2 LONG</span>';
+      const hedgeLabel = t.hedge && t.hedge.strike ? '<div class="text-xs text-blue-600">\ud83d\udee1\ufe0f Hedge: ' + t.hedge.strike + ' ' + t.hedge.type + '</div>' : '';
+      const centerContent = t.status === 'Closed' ? '<div class="mt-1 font-bold ' + (Number(t.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600') + '">' + Calc.money(t.realized_pnl) + '</div>' : '<div class="mt-1 text-blue-600">Risk: ' + Calc.money(t.actual_risk) + '</div>';
+      card.innerHTML = '<div class="font-bold flex justify-between"><span>' + t.instrument + '</span> <span class="text-xs text-gray-500 bg-gray-100 px-1 rounded">' + t.system + '</span></div><div class="mt-1 text-xs text-gray-500">' + dirLabel + ' \u2022 Qty: ' + t.final_qty + ' \u2022 ' + t.date + '</div>' + hedgeLabel + centerContent;
+
+      // Drag events
+      card.ondragstart = (e) => { e.dataTransfer.setData('text/plain', t.id); card.classList.add('dragging'); };
+      card.ondragend = () => card.classList.remove('dragging');
+
+      // Smart routing on click
       card.onclick = () => {
-        $('.tab-btn[data-tab="trades"]').click();
-        setTimeout(() => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }, t.parent_id || t.id), 50);
+        if (t.status === 'Closed') {
+          $('.tab-btn[data-tab="pnl"]').click();
+        } else {
+          $('.tab-btn[data-tab="trades"]').click();
+          setTimeout(() => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }, t.parent_id || t.id), 50);
+        }
       };
 
       col.appendChild(card);
@@ -488,119 +595,189 @@ const UI = {
     const openT = $('#pnl-open'); const closedT = $('#pnl-closed');
     if (!openT || !closedT) return;
     openT.innerHTML = ''; closedT.innerHTML = '';
-    store.state.trades.forEach(t => {
+
+    // Get filters
+    const txtFilt = $('#pnl-filter-inst') ? $('#pnl-filter-inst').value.trim().toUpperCase() : '';
+    const sysFilt = $('#pnl-filter-sys') ? $('#pnl-filter-sys').value : '';
+    const periodFilt = $('#pnl-filter-period') ? $('#pnl-filter-period').value : 'all';
+
+    const isDateMatch = (dStr) => {
+      if (periodFilt === 'all') return true;
+      if (!dStr) return false;
+      const d = new Date(dStr);
+      const now = new Date();
+      if (periodFilt === 'today') return d.toDateString() === now.toDateString();
+      if (periodFilt === 'week') {
+        const firstDay = new Date(now.setDate(now.getDate() - now.getDay()));
+        return d >= firstDay;
+      }
+      if (periodFilt === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      if (periodFilt === 'ytd') return d.getFullYear() === now.getFullYear();
+      return true;
+    };
+
+    const sysSel = $('#pnl-filter-sys');
+    if (sysSel && sysSel.options.length <= 1) {
+      store.state.systems.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.name; opt.textContent = s.name;
+        sysSel.appendChild(opt);
+      });
+    }
+
+    const filteredTrades = store.state.trades.filter(t => {
+      if (txtFilt && !(t.instrument.toUpperCase().includes(txtFilt) || (t.tags || []).some(tt => tt.toUpperCase().includes(txtFilt)))) return false;
+      if (sysFilt && t.system !== sysFilt) return false;
+      if (!isDateMatch(t.date)) return false;
+      return true;
+    });
+
+    filteredTrades.forEach(t => {
       if (t.status === 'Open') {
         const tr = document.createElement('tr');
-        // Add Link Button
-        const linkBtn = `<button class="jump-btn ml-2 text-xs text-blue-500 hover:text-blue-700" title="View in Trades">↗</button>`;
+        const linkBtn = '<button class="jump-btn ml-2 text-xs text-blue-500 hover:text-blue-700" title="View in Trades">\u2197</button>';
+        const dirBadge = t.direction === 'Short' ? '<span class="text-xs font-bold text-red-500">SHORT</span>' : '<span class="text-xs font-bold text-green-600">LONG</span>';
 
-        tr.innerHTML = `<td class="p-2">${t.date}</td>
-        <td>${t.instrument}${t.strike ? ' ' + t.strike + ' ' + t.optionType : ''} ${linkBtn}</td>
-        <td>${t.entry}</td><td class="qty-cell">${t.final_qty}</td><td><input data-id="${t.id}" class="mark-input border p-1 rounded text-sm" style="width:100px" value="${t.mark_price || ''}"></td><td class="unreal">—</td><td><button data-id="${t.id}" class="close-btn px-2 py-1 rounded text-sm bg-green-600 text-white">Close</button></td>`;
+        tr.innerHTML = '<td class="p-2">' + t.date + '</td>' +
+        '<td>' + t.instrument + (t.strike ? ' ' + t.strike + ' ' + t.optionType : '') + ' ' + linkBtn + '</td>' +
+        '<td>' + dirBadge + '</td>' +
+        '<td>' + t.entry + '</td><td class="qty-cell">' + t.final_qty + '</td>' +
+        '<td><input data-id="' + t.id + '" class="mark-input border p-1 rounded text-sm w-20" value="' + (t.mark_price || '') + '"></td>' +
+        '<td class="unreal text-gray-400 font-semibold">\u2014</td>' +
+        '<td class="risk-bar-cell w-32">\u2014</td>' +
+        '<td><button data-id="' + t.id + '" class="close-btn px-2 py-1 rounded text-sm bg-indigo-600 text-white hover:bg-indigo-700">Close</button></td>';
+        
         openT.appendChild(tr);
 
         tr.querySelector('.jump-btn').addEventListener('click', () => {
-          // Go to trades tab
-          const masterId = t.parent_id || t.id;
           $('.tab-btn[data-tab="trades"]').click();
-          // Re-render with highlight (timeout to allow tab switch?)
-          // actually the click listener on tab renders trades immediately.
-          // WE need to override it or set a flag.
-          // Easier: Call renderTrades properly after the click.
-          setTimeout(() => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }, masterId), 50);
+          setTimeout(() => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }, t.parent_id || t.id), 50);
         });
 
-        const markInput = tr.querySelector('.mark-input');
-        const unrealCell = tr.querySelector('.unreal');
-        if (t.mark_price) {
-          const pnl = (Number(t.mark_price) - Number(t.entry)) * Number(t.final_qty);
-          unrealCell.textContent = Calc.money(pnl);
-        }
-        markInput.addEventListener('input', (e) => {
-          const id = e.target.dataset.id;
-          const tglass = store.state.trades.find(x => x.id === id);
-          if (!tglass) return;
-          const raw = e.target.value;
+        const updateLiveMath = (raw) => {
+          const unrealCell = tr.querySelector('.unreal');
+          const barCell = tr.querySelector('.risk-bar-cell');
+          if (raw.trim() === '') {
+            unrealCell.textContent = '\u2014'; unrealCell.className = 'unreal text-gray-400 font-semibold';
+            barCell.innerHTML = '\u2014';
+            return;
+          }
           const parsed = Number(raw || 0);
-          tglass.mark_price = parsed;
-          const pnl = (parsed - Number(tglass.entry || 0)) * Number(tglass.final_qty || 0);
-          unrealCell.textContent = (raw.trim() === '') ? '—' : Calc.money(pnl);
+          const dir = (t.direction === 'Short') ? -1 : 1;
+          const pnl = dir * (parsed - Number(t.entry || 0)) * Number(t.final_qty || 0);
+          unrealCell.textContent = Calc.money(pnl);
+          unrealCell.className = 'unreal font-semibold ' + (pnl >= 0 ? 'text-green-600' : 'text-red-600');
+          
+          const riskAmt = Number(t.actual_risk) || 0.01;
+          const pct = Math.min(100, (Math.abs(pnl) / riskAmt) * 100);
+          const color = pnl >= 0 ? 'green' : 'red';
+          let mText = pnl >= 0 ? '+' + (pct/100).toFixed(1) + 'R' : '-' + (pct/100).toFixed(1) + 'R';
+          if (pnl === 0) mText = '0R';
+          barCell.innerHTML = '<div class="flex items-center gap-2"><div class="progress-bg w-16"><div class="progress-bar ' + color + '" style="width:' + pct + '%"></div></div><span class="text-xs text-gray-500">' + mText + '</span></div>';
+        };
+
+        if (t.mark_price) updateLiveMath(String(t.mark_price));
+
+        tr.querySelector('.mark-input').addEventListener('input', (e) => {
+          const raw = e.target.value;
+          t.mark_price = raw.trim() === '' ? null : Number(raw);
+          updateLiveMath(raw);
           store.save();
         });
         tr.querySelector('.close-btn').addEventListener('click', () => UI.handleCloseTrade(t));
       }
     });
-    this.renderClosedTradesGrouped(closedT);
+
+    this.renderClosedTradesGrouped(closedT, filteredTrades.filter(x => x.status === 'Closed'));
   },
 
   handleCloseTrade(trade) {
-    const closePriceStr = prompt('Enter close price for ' + trade.instrument + ':', trade.entry);
-    if (closePriceStr === null) return;
-    const closePrice = Number(closePriceStr);
-    if (isNaN(closePrice)) return alert('Invalid price');
+    const modal = $('#modal-close');
+    if (!modal) return;
+    
+    // Reset modal fields
+    $('#modal-close-price').value = trade.entry;
+    $('#modal-close-date').value = Calc.nowDate();
+    
+    // Set Qty slider
+    const slider = $('#modal-close-qty-slider');
+    const disp = $('#modal-close-qty-display');
+    const maxdisp = $('#modal-close-qty-max');
     const maxQty = trade.final_qty;
-    const qtyStr = prompt('Enter qty to close (max ' + maxQty + '):', String(maxQty));
-    if (qtyStr === null) return;
-    let qtyClose = Number(qtyStr);
+    slider.max = maxQty;
+    slider.value = maxQty;
+    disp.textContent = maxQty;
+    maxdisp.textContent = maxQty;
 
-    const instObj = store.state.instruments.find(x => x.symbol === trade.instrument);
-    const lotSize = instObj ? Number(instObj.lot || 1) : 1;
+    // Show info
+    const dirTxt = trade.direction === 'Short' ? '\u25bc SHORT' : '\u25b2 LONG';
+    $('#modal-close-info').innerHTML = `<b>${trade.instrument}</b> (${dirTxt})<br>Entry: ${trade.entry} &middot; Max Qty: ${maxQty}`;
 
-    // Default round down for close, or just strict? Let's use standard lot enforcement (Floor) for safety on partials
-    const adjusted = Calc.enforceLotSize(qtyClose, lotSize, 'down');
+    // Update display on slide
+    slider.oninput = () => disp.textContent = slider.value;
 
-    if (qtyClose !== adjusted && qtyClose < maxQty) {
-      if (!confirm(`Adjust qty ${qtyClose} to valid lot multiple ${adjusted}?`)) return;
-      qtyClose = adjusted;
-    }
-    if (qtyClose <= 0 || qtyClose > maxQty) return alert('Invalid qty');
-    const realized = (closePrice - trade.entry) * qtyClose;
+    modal.classList.remove('hidden');
 
-    if (qtyClose < maxQty) {
-      // PARTIAL CLOSE
-      trade.final_qty -= qtyClose;
-      trade.qty_rounded = trade.final_qty;
-      trade.actual_risk = trade.final_qty * Math.abs(trade.entry - trade.exit);
+    // Close X button
+    $('#btn-modal-close-x').onclick = () => modal.classList.add('hidden');
 
-      // Determine Child ID index
-      // Find all children of this trade
-      const siblings = store.state.trades.filter(x => x.parent_id === trade.id);
-      const suffix = siblings.length + 1;
-      const childId = trade.id + '.' + suffix;
+    // Submit handler
+    const btnSubmit = $('#btn-modal-submit-close');
+    btnSubmit.onclick = () => {
+      const closePrice = Number($('#modal-close-price').value);
+      if (isNaN(closePrice) || closePrice <= 0) return alert('Invalid close price');
+      let qtyClose = Number(slider.value);
 
-      const closedObj = {
-        ...trade,
-        id: childId,
-        parent_id: trade.id,
-        final_qty: qtyClose,
-        qty_rounded: qtyClose,
-        actual_risk: Math.abs(trade.entry - trade.exit) * qtyClose,
-        status: 'Closed',
-        close_price: closePrice,
-        close_date: Calc.nowDate(),
-        realized_pnl: realized,
-        notes: (trade.notes || '') + ' (partial close)',
-        mark_price: null
-      };
+      const instObj = store.state.instruments.find(x => x.symbol === trade.instrument);
+      const lotSize = instObj ? Number(instObj.lot || 1) : 1;
+      const adjusted = Calc.enforceLotSize(qtyClose, lotSize, 'down');
 
-      store.addTrade(closedObj);
-    } else {
-      // FULL CLOSE
-      trade.status = 'Closed';
-      // trade.parent_id = trade.id; // NO! Keep original ID if it's the parent closing itself. Structure update: Only truly partial splits get new rows? 
-      // Wait, if we close the parent fully, it just becomes status=Closed. It stays as the main row.
-      // If user wants to see it in "Closed" section grouped, we handle that in renderClosedTradesGrouped.
-      trade.close_price = closePrice;
-      trade.close_date = Calc.nowDate();
-      trade.realized_pnl = realized;
-      trade.mark_price = null;
-      store.save();
-    }
-    UI.renderPNL();
+      if (qtyClose !== adjusted && qtyClose < maxQty) {
+        if (!confirm(`Adjust qty ${qtyClose} to valid lot multiple ${adjusted}?`)) return;
+        qtyClose = adjusted;
+      }
+      if (qtyClose <= 0 || qtyClose > maxQty) return alert('Invalid qty');
+
+      const dir = (trade.direction === 'Short') ? -1 : 1;
+      const realized = dir * (closePrice - trade.entry) * qtyClose;
+      const cDate = $('#modal-close-date').value || Calc.nowDate();
+
+      if (qtyClose < maxQty) {
+        // PARTIAL CLOSE
+        trade.final_qty -= qtyClose;
+        trade.qty_rounded = trade.final_qty;
+        trade.actual_risk = trade.final_qty * Math.abs(trade.entry - trade.exit);
+
+        const siblings = store.state.trades.filter(x => x.parent_id === trade.id);
+        const childId = trade.id + '.' + (siblings.length + 1);
+
+        const closedObj = {
+          ...trade, id: childId, parent_id: trade.id,
+          final_qty: qtyClose, qty_rounded: qtyClose,
+          actual_risk: Math.abs(trade.entry - trade.exit) * qtyClose,
+          status: 'Closed', close_price: closePrice, close_date: cDate,
+          realized_pnl: realized, notes: (trade.notes || '') + ' (partial close)',
+          mark_price: null
+        };
+        store.addTrade(closedObj);
+      } else {
+        // FULL CLOSE
+        trade.status = 'Closed';
+        trade.close_price = closePrice;
+        trade.close_date = cDate;
+        trade.realized_pnl = realized;
+        trade.mark_price = null;
+        store.save();
+      }
+      
+      modal.classList.add('hidden');
+      UI.renderPNL();
+      UI.renderKanban();
+    };
   },
 
-  renderClosedTradesGrouped(container) {
-    const closed = store.state.trades.filter(x => x.status === 'Closed');
+  renderClosedTradesGrouped(container, closedTradesOverride = null) {
+    const closed = closedTradesOverride || store.state.trades.filter(x => x.status === 'Closed');
     closed.forEach(c => {
       if (!c.parent_id) {
         const parent = store.state.trades.find(t => t.id !== c.id && t.instrument === c.instrument && t.entry === c.entry && t.system === c.system);
@@ -620,27 +797,50 @@ const UI = {
       if (!parent && items.length) parent = items[0];
       const totalQty = items.reduce((s, i) => s + i.final_qty, 0);
       const totalRealized = items.reduce((s, i) => s + i.realized_pnl, 0);
+      const totalRisk = items.reduce((s, i) => s + (i.actual_risk || 0.01), 0);
       const weightedExit = totalQty ? (items.reduce((s, i) => s + (i.close_price * i.final_qty), 0) / totalQty) : 0;
+      
       const tr = document.createElement('tr');
-      tr.classList.add('bg-gray-50', 'border-b');
+      tr.classList.add('bg-white', 'border-b', 'hover:bg-gray-50');
       const expandId = 'grp-' + key.replace(/[^a-zA-Z0-9]/g, '');
-      tr.innerHTML = `<td class="p-2">${items.length > 1 ? `<button data-target="${expandId}" class="toggle-grp text-xs bg-gray-200 px-1 rounded">▶</button>` : ''} ${items[items.length - 1].close_date}</td><td>${parent.instrument}</td><td>${parent.entry}</td><td>${weightedExit.toFixed(2)}</td><td>${totalQty}</td><td class="${totalRealized >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold">${Calc.money(totalRealized)}</td>`;
+      const dirBadge = parent.direction === 'Short' ? '<span class="text-xs font-bold text-red-500">SHORT</span>' : '<span class="text-xs font-bold text-green-600">LONG</span>';
+
+      // Progress bar for parent
+      const pct = Math.min(100, (Math.abs(totalRealized) / (parent.actual_risk || totalRisk || 0.01)) * 100);
+      const color = totalRealized >= 0 ? 'green' : 'red';
+      const mText = totalRealized >= 0 ? `+${(pct/100).toFixed(1)}R` : `-${(pct/100).toFixed(1)}R`;
+      const pBar = `<div class="flex items-center gap-2"><div class="progress-bg w-16"><div class="progress-bar ${color}" style="width:${pct}%"></div></div><span class="text-xs text-gray-500">${mText}</span></div>`;
+
+      tr.innerHTML = `<td class="p-2">${items.length > 1 ? `<button data-target="${expandId}" class="toggle-grp text-xs text-gray-500 hover:text-gray-900 mr-1 transition-transform">\u25b6</button>` : '<span class="w-3 mr-1 inline-block"></span>'} ${items[items.length - 1].close_date}</td><td>${parent.instrument}</td><td>${dirBadge}</td><td>${parent.entry}</td><td>${weightedExit.toFixed(2)}</td><td>${totalQty}</td><td class="${totalRealized >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold">${Calc.money(totalRealized)}</td><td>${pBar}</td><td><button class="jump-btn ml-2 text-xs text-blue-500 hover:text-blue-700" title="View in Trades">\u2197</button></td>`;
       container.appendChild(tr);
+
+      tr.querySelector('.jump-btn').addEventListener('click', () => {
+        $('.tab-btn[data-tab="trades"]').click();
+        setTimeout(() => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }, parent.id), 50);
+      });
+
       if (items.length > 1) {
         items.forEach(it => {
           const sub = document.createElement('tr');
-          sub.classList.add(expandId, 'hidden', 'text-xs', 'text-gray-500', 'bg-white');
-          sub.innerHTML = `<td></td><td class="pl-4">Partial: ${it.close_date}</td><td>—</td><td>${it.close_price}</td><td>${it.final_qty}</td><td>${Calc.money(it.realized_pnl)}</td>`;
+          sub.classList.add(expandId, 'hidden', 'text-xs', 'text-gray-500', 'bg-gray-50', 'border-b');
+
+          const sPct = Math.min(100, (Math.abs(it.realized_pnl) / (it.actual_risk || 0.01)) * 100);
+          const sColor = it.realized_pnl >= 0 ? 'green' : 'red';
+          const sText = it.realized_pnl >= 0 ? `+${(sPct/100).toFixed(1)}R` : `-${(sPct/100).toFixed(1)}R`;
+          const sBar = `<div class="flex items-center gap-2"><div class="progress-bg w-10"><div class="progress-bar ${sColor}" style="width:${sPct}%"></div></div><span class="text-xs text-gray-400">${sText}</span></div>`;
+
+          sub.innerHTML = `<td class="pl-8">Part: ${it.close_date}</td><td></td><td></td><td>\u2014</td><td>${it.close_price}</td><td>${it.final_qty}</td><td class="${it.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(it.realized_pnl)}</td><td>${sBar}</td><td></td>`;
           container.appendChild(sub);
         });
       }
     });
+
     container.querySelectorAll('.toggle-grp').forEach(btn => {
       btn.addEventListener('click', () => {
         const target = btn.dataset.target;
         const subs = document.getElementsByClassName(target);
         for (let row of subs) { row.classList.toggle('hidden'); }
-        btn.textContent = btn.textContent === '▶' ? '▼' : '▶';
+        btn.textContent = btn.textContent === '\u25b6' ? '\u25bc' : '\u25b6';
       });
     });
   },
@@ -969,7 +1169,7 @@ function setupNewTradeForm() {
     });
   }
   if ($('#nt-date') && !$('#nt-date').value) $('#nt-date').value = Calc.nowDate();
-  const ids = ['nt-system', 'nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags', 'nt-round-mode'];
+  const ids = ['nt-system', 'nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags', 'nt-round-mode', 'hedge-premium', 'hedge-qty'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.oninput = updateTradeCalc;
@@ -1016,7 +1216,6 @@ function updateTradeCalc() {
   let qtyrounded = '—';
   let finalqty = '—';
   if (qty > 0 && lot > 0) {
-    // USE NEW ROUNDING LOGIC
     qtyrounded = Calc.enforceLotSize(qty, lot, mode);
     finalqty = qtyrounded;
   }
@@ -1026,6 +1225,17 @@ function updateTradeCalc() {
   $('#calc-actual').textContent = actualRisk === '—' ? '—' : Calc.money(actualRisk);
   const totalBuy = (finalqty !== '—' && entry) ? (finalqty * entry) : '—';
   $('#calc-totalbuy').textContent = totalBuy === '—' ? '—' : Calc.money(totalBuy);
+
+  // Hedge Risk Calc
+  const hedgePremium = Number($('#hedge-premium') ? $('#hedge-premium').value || 0 : 0);
+  const hedgeQty = Number($('#hedge-qty') ? $('#hedge-qty').value || 0 : 0);
+  const hedgeRisk = hedgePremium * hedgeQty;
+  if ($('#calc-hedge-risk')) $('#calc-hedge-risk').textContent = hedgeRisk > 0 ? Calc.money(hedgeRisk) : '—';
+
+  // Total Risk (Main + Hedge)
+  const mainRiskNum = (actualRisk !== '—') ? actualRisk : 0;
+  const totalRisk = mainRiskNum + hedgeRisk;
+  if ($('#calc-total-risk')) $('#calc-total-risk').textContent = totalRisk > 0 ? Calc.money(totalRisk) : '—';
 }
 
 function saveTrade() {
@@ -1068,15 +1278,38 @@ function saveTrade() {
     newId = 'trade_' + (maxId + 1);
   }
 
+  // Direction
+  const direction = $('#nt-direction') ? $('#nt-direction').value : 'Long';
+
+  // Hedge
+  let hedge = null;
+  const hedgePremium = Number($('#hedge-premium') ? $('#hedge-premium').value || 0 : 0);
+  const hedgeQty = Number($('#hedge-qty') ? $('#hedge-qty').value || 0 : 0);
+  if (hedgePremium > 0 && hedgeQty > 0) {
+    hedge = {
+      instrument: $('#hedge-instrument') ? $('#hedge-instrument').value.trim() : inst,
+      strike: Number($('#hedge-strike') ? $('#hedge-strike').value || 0 : 0),
+      type: $('#hedge-type') ? $('#hedge-type').value : 'PE',
+      entry: hedgePremium,
+      qty: hedgeQty,
+      mark_price: null,
+      exit_price: null
+    };
+  }
+  const hedgeRisk = hedge ? hedge.entry * hedge.qty : 0;
+  const total_risk = actual_risk + hedgeRisk;
+
   const tradeObj = {
     id: newId,
     date: $('#nt-date').value || Calc.nowDate(),
     system: sysName,
     instrument: inst,
+    direction,
     strike: $('#nt-strike').value ? Number($('#nt-strike').value) : null,
     optionType: $('#nt-optiontype').value || null,
     entry, exit, lot,
-    qty_risk: qty, final_qty, qty_rounded: final_qty, actual_risk, leverage,
+    qty_risk: qty, final_qty, qty_rounded: final_qty, actual_risk, total_risk, leverage,
+    hedge,
     flag: leverage > 1 ? 'Over risk' : 'OK',
     tags: $('#nt-tags').value.split(',').map(s => s.trim()).filter(Boolean),
     notes: '', status: 'Open', close_price: null, close_date: null, realized_pnl: null, mark_price: null
@@ -1096,11 +1329,15 @@ function saveTrade() {
 
 function resetForm() {
   editingTradeId = null;
-  ['nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags'].forEach(id => {
+  ['nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags',
+   'hedge-instrument', 'hedge-strike', 'hedge-premium', 'hedge-qty'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
   $('#nt-system').value = '';
+  if ($('#nt-direction')) $('#nt-direction').value = 'Long';
+  setDirection('Long');
+  if ($('#hedge-fields')) $('#hedge-fields').classList.add('hidden');
   updateTradeCalc();
 }
 
@@ -1145,6 +1382,80 @@ function setupGlobalListeners() {
   if ($('#add-instrument')) $('#add-instrument').onclick = () => {
     store.addInstrument({ symbol: 'New_Inst', lot: 1, type: 'Futures' });
     UI.renderInstruments();
+  };
+}
+
+// Direction toggle
+function setDirection(dir) {
+  if ($('#nt-direction')) $('#nt-direction').value = dir;
+  const longBtn = $('#dir-long');
+  const shortBtn = $('#dir-short');
+  if (longBtn && shortBtn) {
+    if (dir === 'Long') {
+      longBtn.className = 'flex-1 py-2 rounded-l-md text-sm font-semibold bg-green-600 text-white border border-green-600 transition-all';
+      shortBtn.className = 'flex-1 py-2 rounded-r-md text-sm font-semibold bg-white text-gray-600 border border-gray-300 transition-all';
+    } else {
+      shortBtn.className = 'flex-1 py-2 rounded-r-md text-sm font-semibold bg-red-600 text-white border border-red-600 transition-all';
+      longBtn.className = 'flex-1 py-2 rounded-l-md text-sm font-semibold bg-white text-gray-600 border border-gray-300 transition-all';
+    }
+  }
+  // Auto-set hedge type based on direction
+  if ($('#hedge-type')) {
+    $('#hedge-type').value = (dir === 'Long') ? 'PE' : 'CE';
+  }
+  updateTradeCalc();
+}
+
+// Fill Trade Form (for editing)
+function fillTradeForm(trade) {
+  if (!trade) return;
+  if ($('#nt-system')) $('#nt-system').value = trade.system || '';
+  if ($('#nt-instrument')) $('#nt-instrument').value = trade.instrument || '';
+  if ($('#nt-date')) $('#nt-date').value = trade.date || '';
+  if ($('#nt-entry')) $('#nt-entry').value = trade.entry || '';
+  if ($('#nt-exit')) $('#nt-exit').value = trade.exit || '';
+  if ($('#nt-lot')) $('#nt-lot').value = trade.lot || '';
+  if ($('#nt-strike')) $('#nt-strike').value = trade.strike || '';
+  if ($('#nt-optiontype')) $('#nt-optiontype').value = trade.optionType || 'CE';
+  if ($('#nt-tags')) $('#nt-tags').value = (trade.tags || []).join(', ');
+  setDirection(trade.direction || 'Long');
+  // Hedge
+  if (trade.hedge && trade.hedge.strike) {
+    if ($('#hedge-fields')) $('#hedge-fields').classList.remove('hidden');
+    if ($('#hedge-instrument')) $('#hedge-instrument').value = trade.hedge.instrument || '';
+    if ($('#hedge-strike')) $('#hedge-strike').value = trade.hedge.strike || '';
+    if ($('#hedge-type')) $('#hedge-type').value = trade.hedge.type || 'PE';
+    if ($('#hedge-premium')) $('#hedge-premium').value = trade.hedge.entry || '';
+    if ($('#hedge-qty')) $('#hedge-qty').value = trade.hedge.qty || '';
+  } else {
+    if ($('#hedge-fields')) $('#hedge-fields').classList.add('hidden');
+  }
+  updateTradeCalc();
+}
+
+// Floating Quick Trade Button logic
+const quickTradeBtn = document.getElementById('btn-quick-trade');
+if (quickTradeBtn) {
+  quickTradeBtn.addEventListener('click', () => {
+    resetForm();
+    const btn = document.querySelector('.tab-btn[data-tab="newtrade"]');
+    if (btn) btn.click();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+
+// PnL Filter listeners
+['pnl-filter-inst', 'pnl-filter-sys', 'pnl-filter-period'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(id === 'pnl-filter-inst' ? 'keyup' : 'change', () => UI.renderPNL());
+});
+if ($('#pnl-filter-btn')) $('#pnl-filter-btn').onclick = () => UI.renderPNL();
+if ($('#pnl-filter-clear')) {
+  $('#pnl-filter-clear').onclick = () => {
+    $('#pnl-filter-inst').value = '';
+    $('#pnl-filter-sys').value = '';
+    $('#pnl-filter-period').value = 'all';
+    UI.renderPNL();
   };
 }
 
