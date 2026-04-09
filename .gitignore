@@ -3,3 +3,7 @@ node_modules/
 *.log
 .DS_Store
 tmp/
+trading_risk_engine.db
+sessions.json
+Instruments_List.xlsx
+flask_integration_plan.md

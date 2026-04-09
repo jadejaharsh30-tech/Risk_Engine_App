@@ -21,7 +21,7 @@ export function enforceLotSize(qty, lot) {
 export function computeWinRate(trades) {
     const closed = trades.filter(t => t.status === 'Closed');
     if (!closed.length) return null;
-    const wins = closed.filter(t => t.realized_pnl > 0).length;
+    const wins = closed.filter(t => Number(t.realized_pnl || 0) >= 0).length;
     return (wins / closed.length) * 100;
 }
 
@@ -46,7 +46,7 @@ export function computeAvgRMultiple(trades, systems) {
     let sum = 0, count = 0;
     closed.forEach(t => {
         const sys = systems.find(s => s.name === t.system);
-        const R = sys ? (sys.R || 0) : 0;
+        const R = t.R_at_entry || (sys ? (sys.R || 0) : 0);
         if (R && t.realized_pnl != null) {
             sum += (t.realized_pnl / R);
             count++;
@@ -65,15 +65,18 @@ export function estimateMaxDrawdown(trades) {
         const dd = (peak - cum);
         if (dd > maxdd) maxdd = dd;
     });
-    const peakVal = peak || 1;
-    return (maxdd / peakVal) * 100;
+    if (peak <= 0) return null; // No profitable peak — can't compute meaningful %
+    return (maxdd / peak) * 100;
 }
 
 export function computeSystemMetrics(sys, trades) {
     const openTrades = trades.filter(t => t.system === sys.name && t.status === 'Open');
     const closedTrades = trades.filter(t => t.system === sys.name && t.status === 'Closed');
     const riskInPlay = openTrades.reduce((a, b) => a + Number(b.actual_risk || 0), 0);
-    const unrealized = openTrades.reduce((a, b) => a + ((Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0)), 0);
+    const unrealized = openTrades.reduce((a, b) => {
+        const dir = (b.direction === 'Short') ? -1 : 1;
+        return a + (dir * (Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0));
+    }, 0);
     const realized = closedTrades.reduce((a, b) => a + Number(b.realized_pnl || 0), 0);
     const maxTrades = sys.capital && sys.R ? Math.floor(sys.capital / sys.R) : 0;
     const openCount = openTrades.length;
