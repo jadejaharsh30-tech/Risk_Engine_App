@@ -50,6 +50,128 @@
       background: var(--card-dark);
       color: #e6eef8;
       box-shadow: none;
+      border: 1px solid #1e293b;
+    }
+
+    .dark body {
+      background: var(--bg);
+      color: #e2e8f0;
+    }
+
+    .dark input,
+    .dark select {
+      background: #1e293b !important;
+      color: #fff !important;
+      border-color: #334155 !important;
+    }
+
+    .dark table th {
+      background: #0f172a !important;
+      color: #94a3b8 !important;
+      border-color: #1e293b !important;
+    }
+
+    .dark table td {
+      border-color: #1e293b !important;
+      color: #cbd5e1 !important;
+    }
+
+    .dark tr.bg-gray-50,
+    .dark tr:hover {
+      background: #1e293b !important;
+    }
+
+    .dark .bg-white {
+      background: var(--card-dark) !important;
+      color: #e2e8f0;
+      border-color: #334155 !important;
+    }
+
+    .dark .bg-gray-50,
+    .dark .bg-gray-100,
+    .dark .bg-gray-200 {
+      background: #1e293b !important;
+      color: #e2e8f0 !important;
+      border-color: #334155 !important;
+    }
+
+    .dark .text-gray-900,
+    .dark .text-gray-800,
+    .dark .text-gray-700,
+    .dark .text-gray-600 {
+      color: #e2e8f0 !important;
+    }
+
+    .dark .text-gray-500,
+    .dark .text-gray-400 {
+      color: #94a3b8 !important;
+    }
+
+    .dark #modal-close>div,
+    .dark #modal-confirm>div {
+      background: var(--card-dark);
+      border: 1px solid #334155;
+    }
+
+    /* Kanban & Pills Dark Overrides */
+    .dark .bg-blue-50 {
+      background: #1e3a8a !important;
+      border-color: #1e3a8a !important;
+    }
+
+    .dark .bg-blue-100,
+    .dark .bg-blue-200 {
+      background: #1d4ed8 !important;
+      color: #bfdbfe !important;
+    }
+
+    .dark .text-blue-800 {
+      color: #bfdbfe !important;
+    }
+
+    .dark .bg-green-50 {
+      background: #064e3b !important;
+      border-color: #064e3b !important;
+    }
+
+    .dark .bg-green-100,
+    .dark .bg-green-200 {
+      background: #047857 !important;
+      color: #a7f3d0 !important;
+    }
+
+    .dark .text-green-800 {
+      color: #a7f3d0 !important;
+    }
+
+    .dark .bg-red-50 {
+      background: #7f1d1d !important;
+      border-color: #7f1d1d !important;
+    }
+
+    .dark .bg-red-100,
+    .dark .bg-red-200 {
+      background: #b91c1c !important;
+      color: #fecaca !important;
+    }
+
+    .dark .text-red-800 {
+      color: #fecaca !important;
+    }
+
+    .dark .pill-open {
+      background: #1e3a8a !important;
+      color: #bfdbfe !important;
+    }
+
+    .dark .pill-win {
+      background: #064e3b !important;
+      color: #a7f3d0 !important;
+    }
+
+    .dark .pill-loss {
+      background: #7f1d1d !important;
+      color: #fecaca !important;
     }
 
     .muted {
@@ -74,7 +196,7 @@
     }
 
     .table-scroll {
-      max-height: 48vh;
+      max-height: 120vh;
       overflow: auto;
     }
 
@@ -95,15 +217,49 @@
     /* responsive tweaks */
     @media (max-width:900px) {
       aside {
-        display: none
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 50;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+      }
+
+      aside.open {
+        transform: translateX(0);
+      }
+
+      #mobile-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 40;
+        backdrop-filter: blur(2px);
+      }
+
+      #mobile-overlay.open {
+        display: block;
       }
 
       main {
-        padding: 16px
+        padding: 16px;
       }
 
       .grid-cols-6 {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (min-width:901px) {
+      aside {
+        position: relative;
+        transform: none;
+        bottom: auto;
+        z-index: auto;
+      }
+
+      #mobile-overlay {
+        display: none !important;
       }
     }
   </style>
@@ -112,52 +268,220 @@
   <script src="https://apis.google.com/js/api.js" async defer></script>
   <style>
     /* Phase 2: Interactive Tables */
-    th.sortable { cursor: pointer; user-select: none; position: relative; }
-    th.sortable:hover { background: #e5e7eb; }
-    th.sortable::after { content: '⇅'; margin-left: 4px; opacity: 0.3; font-size: 10px; }
-    th.sortable.asc::after { content: '▲'; opacity: 0.8; }
-    th.sortable.desc::after { content: '▼'; opacity: 0.8; }
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+    }
+
+    th.sortable:hover {
+      background: #e5e7eb;
+    }
+
+    th.sortable::after {
+      content: '⇅';
+      margin-left: 4px;
+      opacity: 0.3;
+      font-size: 10px;
+    }
+
+    th.sortable.asc::after {
+      content: '▲';
+      opacity: 0.8;
+    }
+
+    th.sortable.desc::after {
+      content: '▼';
+      opacity: 0.8;
+    }
 
     /* Hover-only row actions */
-    .row-actions { opacity: 0; transition: opacity 0.15s ease; }
-    tr:hover .row-actions { opacity: 1; }
+    .row-actions {
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    tr:hover .row-actions {
+      opacity: 1;
+    }
 
     /* Status Pills */
-    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-    .pill-open { background: #DBEAFE; color: #1D4ED8; }
-    .pill-win { background: #D1FAE5; color: #047857; }
-    .pill-loss { background: #FEE2E2; color: #B91C1C; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .pill-open {
+      background: #DBEAFE;
+      color: #1D4ED8;
+    }
+
+    .pill-win {
+      background: #D1FAE5;
+      color: #047857;
+    }
+
+    .pill-loss {
+      background: #FEE2E2;
+      color: #B91C1C;
+    }
 
     /* Expandable child rows */
-    .child-row { background: #F9FAFB; }
-    .child-row td:first-child { padding-left: 28px !important; }
-    .expand-btn { cursor: pointer; transition: transform 0.2s ease; display: inline-block; }
-    .expand-btn.open { transform: rotate(90deg); }
+    .child-row {
+      background: #F9FAFB;
+    }
+
+    .child-row td:first-child {
+      padding-left: 28px !important;
+    }
+
+    .expand-btn {
+      cursor: pointer;
+      transition: transform 0.2s ease;
+      display: inline-block;
+    }
+
+    .expand-btn.open {
+      transform: rotate(90deg);
+    }
 
     /* Kanban Drag & Drop */
-    .kanban-card { transition: transform 0.15s ease, box-shadow 0.15s ease; }
-    .kanban-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.12); }
-    .kanban-card.dragging { opacity: 0.5; transform: rotate(2deg); }
-    .kanban-col.drag-over { background: #EEF2FF !important; border: 2px dashed #6366F1; }
+    .kanban-card {
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .kanban-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    }
+
+    .kanban-card.dragging {
+      opacity: 0.5;
+      transform: rotate(2deg);
+    }
+
+    .kanban-col.drag-over {
+      background: #EEF2FF !important;
+      border: 2px dashed #6366F1;
+    }
 
     /* Phase 3: Progress Bars & Floating UI */
-    .progress-bg { background: #E5E7EB; border-radius: 999px; height: 6px; width: 100%; overflow: hidden; margin-top: 4px; }
-    .progress-bar { height: 100%; border-radius: 999px; transition: width 0.3s ease; }
-    .progress-bar.red { background: #EF4444; }
-    .progress-bar.green { background: #10B981; }
-    
-    .quick-trade-btn { 
-      position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px; 
-      background: #4F46E5; color: white; border-radius: 50%; display: flex; 
-      align-items: center; justify-content: center; box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
-      cursor: pointer; transition: transform 0.2s ease, background 0.2s ease; z-index: 40;
+    .progress-bg {
+      background: #E5E7EB;
+      border-radius: 999px;
+      height: 6px;
+      width: 100%;
+      overflow: hidden;
+      margin-top: 4px;
     }
-    .quick-trade-btn:hover { transform: scale(1.05); background: #4338CA; }
-    .quick-trade-btn svg { width: 24px; height: 24px; }
+
+    .progress-bar {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    .progress-bar.red {
+      background: #EF4444;
+    }
+
+    .progress-bar.green {
+      background: #10B981;
+    }
+
+    .quick-trade-btn {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 56px;
+      height: 56px;
+      background: #4F46E5;
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+      cursor: pointer;
+      transition: transform 0.2s ease, background 0.2s ease;
+      z-index: 40;
+    }
+
+    .quick-trade-btn:hover {
+      transform: scale(1.05);
+      background: #4338CA;
+    }
+
+    .quick-trade-btn svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    /* Toast Notifications */
+    .toast {
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      color: white;
+      max-width: 420px;
+      text-align: center;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+      animation: toast-in 0.25s ease;
+      pointer-events: auto;
+    }
+
+    .toast.success {
+      background: #059669;
+    }
+
+    .toast.error {
+      background: #DC2626;
+    }
+
+    .toast.warning {
+      background: #D97706;
+    }
+
+    .toast.info {
+      background: #2563EB;
+    }
+
+    @keyframes toast-in {
+      from {
+        opacity: 0;
+        transform: translateY(16px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Form Validation states */
+    .field-error {
+      border-color: #EF4444 !important;
+    }
+
+    .field-error-msg {
+      color: #EF4444;
+      font-size: 11px;
+      margin-top: 2px;
+      display: block;
+    }
   </style>
 </head>
 
 <body class="bg-gray-50 text-gray-900">
+  <div id="mobile-overlay"></div>
+  <!-- Toast Notifications -->
+  <div id="toast-container"
+    style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column-reverse;gap:8px;align-items:center;pointer-events:none;">
+  </div>
 
   <!-- Header -->
   <header class="app-header p-4 flex items-center justify-between">
@@ -175,26 +499,71 @@
     </div>
 
     <div class="flex items-center gap-3">
+      <span id="save-indicator"
+        style="opacity:0;transition:opacity 0.5s;font-size:12px;color:#6EE7B7;background:rgba(0,0,0,0.5);padding:2px 8px;border-radius:12px;">Saved
+        ✓</span>
       <div id="header-stats" class="flex gap-3"></div>
       <button id="toggle-sidebar" title="Toggle sidebar" class="btn-icon" style="margin-right:12px;">☰</button>
-      <button id="btn-export-pdf" class="px-3 py-2 bg-white/10 text-white rounded-md text-sm">Export Report</button>
-      <button id="theme-toggle" class="px-3 py-2 bg-white/10 text-white rounded-md text-sm">Theme</button>
+      <div class="relative group flex items-center">
+        <button id="btn-shortcuts-info"
+          class="w-8 h-8 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+        </button>
+        <!-- Hover Popover -->
+        <div
+          class="absolute right-0 top-full mt-2 w-64 p-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 transform origin-top-right scale-95 group-hover:scale-100">
+          <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Keyboard Shortcuts</div>
+          <div class="space-y-2 text-xs">
+            <div class="flex justify-between items-center"><span class="muted font-medium">New Trade</span><kbd
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-900 border dark:border-gray-700 rounded text-gray-600 dark:text-gray-400 font-mono shadow-sm">Alt+N</kbd>
+            </div>
+            <div class="flex justify-between items-center"><span class="muted font-medium">Dashboard</span><kbd
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-900 border dark:border-gray-700 rounded text-gray-600 dark:text-gray-400 font-mono shadow-sm">Alt+D</kbd>
+            </div>
+            <div class="flex justify-between items-center"><span class="muted font-medium">Trades</span><kbd
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-900 border dark:border-gray-700 rounded text-gray-600 dark:text-gray-400 font-mono shadow-sm">Alt+T</kbd>
+            </div>
+            <div class="flex justify-between items-center"><span class="muted font-medium">PnL</span><kbd
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-900 border dark:border-gray-700 rounded text-gray-600 dark:text-gray-400 font-mono shadow-sm">Alt+P</kbd>
+            </div>
+            <div class="flex justify-between items-center"><span class="muted font-medium">Save / Submit</span><kbd
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-900 border dark:border-gray-700 rounded text-gray-600 dark:text-gray-400 font-mono shadow-sm">Alt+S</kbd>
+            </div>
+            <div class="flex justify-between items-center"><span class="muted font-medium">Close / Reset</span><kbd
+                class="px-2 py-1 bg-gray-100 dark:bg-gray-900 border dark:border-gray-700 rounded text-gray-600 dark:text-gray-400 font-mono shadow-sm">Esc</kbd>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button id="btn-export-pdf"
+        class="px-3 py-2 bg-white/10 text-white rounded-md text-sm hover:bg-white/20 transition-colors">Export
+        Report</button>
+      <button id="theme-toggle"
+        class="px-3 py-2 bg-white/10 text-white rounded-md text-sm hover:bg-white/20 transition-colors">Theme</button>
     </div>
   </header>
 
   <div class="min-h-screen flex">
     <!-- Sidebar -->
-    <aside class="w-72 bg-white p-4 border-r">
+    <aside id="sidebar" class="w-72 bg-white p-4 border-r overflow-y-auto flex flex-col">
       <nav class="space-y-2">
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="dashboard">📊 Dashboard</div>
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="systems">⚙ Systems</div>
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="instruments">📦 Instruments</div>
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="newtrade">📝 New Trade</div>
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="trades">📋 Trades</div>
-        <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="kanban">Trello / Kanban</div>
-        <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="analytics">📈 Analytics</div>
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="pnl">💰 PnL</div>
+        <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="kanban">🚦 Trade Pipeline</div>
+        <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="analytics">📈 Analytics</div>
         <div class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer" data-tab="cloud">☁ Cloud Sync</div>
+        <div id="nav-tab-admin"
+          class="tab-btn p-3 rounded-lg hover:bg-gray-50 cursor-pointer font-medium text-indigo-700 hidden"
+          data-tab="admin">👑 Admin Panel</div>
       </nav>
 
       <div class="mt-6 text-sm muted">
@@ -211,6 +580,26 @@
         </div>
         <button id="btn-clear" class="w-full mt-4 px-3 py-2 bg-red-600 text-white rounded-md">Clear Local Data</button>
       </div>
+
+      <!-- User Profile -->
+      <div id="user-profile" class="mt-auto pt-6 border-t hidden">
+        <div class="flex items-center gap-3">
+          <div
+            class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold border border-indigo-200">
+            <span id="user-initials">?</span>
+          </div>
+          <div class="flex-1 overflow-hidden">
+            <div id="user-display-name" class="font-bold text-sm truncate">User</div>
+            <div class="flex items-center gap-2 mt-1">
+              <button id="btn-logout" class="text-xs text-gray-500 hover:text-gray-800 hover:underline">Sign
+                out</button>
+              <span class="text-gray-300">|</span>
+              <button id="btn-delete-account" class="text-xs text-red-500 hover:text-red-700 hover:underline">Delete
+                Account</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <!-- Main -->
@@ -224,9 +613,14 @@
                 <div class="text-xs muted">Total Capital</div>
                 <div id="sum-capital" class="text-xl font-semibold">—</div>
               </div>
-              <div class="rounded-card pos-card w-40">
-                <div class="text-xs muted">Risk in Play</div>
-                <div id="sum-risk" class="text-xl font-semibold">—</div>
+              <div class="rounded-card pos-card w-40 flex flex-col justify-between">
+                <div>
+                  <div class="text-xs muted">Risk in Play</div>
+                  <div id="sum-risk" class="text-xl font-semibold">—</div>
+                </div>
+                <div class="mt-2 w-full bg-gray-200 h-1.5 rounded overflow-hidden">
+                  <div id="util-bar-risk" class="bg-blue-600 h-full rounded transition-all" style="width:0%"></div>
+                </div>
               </div>
               <div class="rounded-card pos-card w-40">
                 <div class="text-xs muted">Realized PnL</div>
@@ -278,8 +672,8 @@
               <div class="text-xs muted">Realized Today</div>
               <div id="risk-daily-pnl" class="font-bold text-lg">—</div>
             </div>
-            <div id="risk-daily-warning" class="hidden mt-2 text-xs text-red-600 bg-red-50 p-1 rounded">Circuit Breaker
-              Triggered! Stop Trading.</div>
+            <div id="risk-daily-warning" class="hidden mt-2 text-xs text-red-600 bg-red-50 p-1 rounded">⛔ Circuit
+              Breaker: Daily loss limit of <span id="risk-daily-limit-val">—</span> hit. Stop Trading.</div>
           </div>
           <div class="rounded-card p-4 bg-white border-l-4 border-l-blue-500">
             <div class="font-semibold text-gray-700">Exposure Monitor</div>
@@ -296,7 +690,7 @@
         <div class="mt-6">
           <div class="font-semibold mb-2">Systems Overview</div>
           <div class="table-scroll rounded-card overflow-hidden border">
-            <table class="w-full text-sm">
+            <table class="w-full text-sm text-left">
               <thead class="bg-gray-50">
                 <tr>
                   <th class="p-2 text-left">System</th>
@@ -319,12 +713,13 @@
           <h3 class="font-semibold">Systems</h3>
           <button id="add-system" class="px-3 py-2 bg-indigo-600 text-white rounded-md">Add System</button>
         </div>
-        <table class="w-full text-sm">
+        <table class="w-full text-sm text-left">
           <thead class="text-left text-gray-600">
             <tr>
               <th>Name</th>
               <th>Capital</th>
               <th>R</th>
+              <th>Daily Loss Limit</th>
               <th>Max Trades</th>
               <th></th>
             </tr>
@@ -337,9 +732,17 @@
       <section id="view-instruments" class="tab-view hidden bg-white rounded-card p-4">
         <div class="flex justify-between items-center mb-4">
           <h3 class="font-semibold">Instruments</h3>
-          <button id="add-instrument" class="px-3 py-2 bg-indigo-600 text-white rounded-md">Add Instrument</button>
+          <div class="flex gap-2 items-center">
+            <label
+              class="px-3 py-2 bg-blue-100 text-blue-700 rounded-md text-sm cursor-pointer hover:bg-blue-200 transition">
+              📤 Upload F&O Master (.xlsx)
+              <input id="upload-fo-master" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
+            </label>
+            <button id="add-instrument" class="px-3 py-2 bg-indigo-600 text-white rounded-md">Add Instrument</button>
+          </div>
         </div>
-        <table class="w-full text-sm">
+        <p id="fo-master-status" class="text-xs text-gray-400 mb-3"></p>
+        <table class="w-full text-sm text-left">
           <thead>
             <tr>
               <th>Symbol</th>
@@ -360,10 +763,12 @@
             <label class="text-sm muted">System</label>
             <select id="nt-system" class="w-full border p-2 rounded"></select>
           </div>
-          <div>
+          <div class="relative">
             <label class="text-sm muted">Instrument</label>
-            <input id="nt-instrument" list="inst-list" class="w-full border p-2 rounded" />
-            <datalist id="inst-list"></datalist>
+            <input id="nt-instrument" class="w-full border p-2 rounded" autocomplete="off"
+              placeholder="Type to search..." />
+            <div id="inst-results"
+              class="absolute z-50 w-full bg-white border rounded shadow-lg max-h-60 overflow-y-auto hidden mt-1"></div>
           </div>
           <div>
             <label class="text-sm muted">Date</label>
@@ -374,17 +779,39 @@
           <div>
             <label class="text-sm muted">Direction</label>
             <div class="flex gap-1 mt-1">
-              <button type="button" id="dir-long" class="flex-1 py-2 rounded-l-md text-sm font-semibold bg-green-600 text-white border border-green-600 transition-all" onclick="setDirection('Long')">▲ Long</button>
-              <button type="button" id="dir-short" class="flex-1 py-2 rounded-r-md text-sm font-semibold bg-white text-gray-600 border border-gray-300 transition-all" onclick="setDirection('Short')">▼ Short</button>
+              <button type="button" id="dir-long"
+                class="flex-1 py-2 rounded-l-md text-sm font-semibold bg-green-600 text-white border border-green-600 transition-all"
+                onclick="setDirection('Long')">▲ Long</button>
+              <button type="button" id="dir-short"
+                class="flex-1 py-2 rounded-r-md text-sm font-semibold bg-white text-gray-600 border border-gray-300 transition-all"
+                onclick="setDirection('Short')">▼ Short</button>
             </div>
             <input type="hidden" id="nt-direction" value="Long" />
+          </div>
+
+          <!-- SIZING MODE TOGGLE -->
+          <div class="col-span-3 flex items-center gap-4 py-2 px-3 bg-indigo-50 rounded-lg border border-indigo-100">
+            <span class="text-sm font-semibold text-indigo-800">Sizing Mode:</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="nt-sizing-mode" class="sr-only peer" />
+              <div
+                class="w-11 h-6 bg-indigo-600 rounded-full peer peer-checked:bg-amber-500 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full">
+              </div>
+            </label>
+            <span id="nt-sizing-label" class="text-sm font-medium text-indigo-700">Lot Mode (1 lot default)</span>
+          </div>
+
+          <!-- NUMBER OF LOTS (Lot Mode only) -->
+          <div id="nt-num-lots-group">
+            <label class="text-sm muted">Number of Lots</label>
+            <input id="nt-num-lots" type="number" min="1" value="1" class="w-full border p-2 rounded" />
           </div>
 
           <div><label class="text-sm muted">Entry</label><input id="nt-entry" type="number"
               class="w-full border p-2 rounded" /></div>
           <div><label class="text-sm muted">Exit/SL</label><input id="nt-exit" type="number"
               class="w-full border p-2 rounded" /></div>
-          <div><label class="text-sm muted">Lot</label><input id="nt-lot" type="number"
+          <div><label class="text-sm muted">Lot Size</label><input id="nt-lot" type="number"
               class="w-full border p-2 rounded" />
           </div>
           <div id="option-fields" class="hidden"><label class="text-sm muted">Strike</label><input id="nt-strike"
@@ -407,15 +834,16 @@
 
         <!-- HEDGE SECTION -->
         <div class="mt-4 border rounded-lg overflow-hidden">
-          <button type="button" id="toggle-hedge" class="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-gray-700 transition-all"
-            onclick="document.getElementById('hedge-fields').classList.toggle('hidden'); this.querySelector('.chevron').classList.toggle('rotate-90')">
+          <button type="button" id="toggle-hedge"
+            class="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 text-sm font-semibold text-gray-700 transition-all">
             <span>🛡️ Add Hedge (Option Leg)</span>
             <span class="chevron transition-transform text-xs">▶</span>
           </button>
           <div id="hedge-fields" class="hidden p-4 bg-blue-50/50 border-t grid grid-cols-3 gap-4">
             <div>
               <label class="text-sm muted">Hedge Instrument</label>
-              <input id="hedge-instrument" list="inst-list" class="w-full border p-2 rounded bg-white" placeholder="e.g., NIFTY" />
+              <input id="hedge-instrument" list="inst-list" class="w-full border p-2 rounded bg-white"
+                placeholder="e.g., NIFTY" />
             </div>
             <div>
               <label class="text-sm muted">Hedge Strike</label>
@@ -430,14 +858,16 @@
             </div>
             <div>
               <label class="text-sm muted">Premium Paid</label>
-              <input id="hedge-premium" type="number" class="w-full border p-2 rounded bg-white" placeholder="Price per unit" />
+              <input id="hedge-premium" type="number" class="w-full border p-2 rounded bg-white"
+                placeholder="Price per unit" />
             </div>
             <div>
               <label class="text-sm muted">Hedge Qty</label>
               <input id="hedge-qty" type="number" class="w-full border p-2 rounded bg-white" />
             </div>
             <div class="flex items-end">
-              <div class="text-xs muted">Hedge Risk: <span id="calc-hedge-risk" class="font-bold text-gray-800">—</span></div>
+              <div class="text-xs muted">Hedge Risk: <span id="calc-hedge-risk" class="font-bold text-gray-800">—</span>
+              </div>
             </div>
           </div>
         </div>
@@ -488,16 +918,40 @@
       <!-- TRADES -->
       <section id="view-trades" class="tab-view hidden bg-white rounded-card p-4">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="font-semibold">Trades</h3>
-          <div class="flex gap-2">
-            <input id="filter-system" list="sys-list" placeholder="Filter system" class="border p-2 rounded" />
-            <input id="filter-instrument" placeholder="Filter instrument/tags" class="border p-2 rounded" />
-            <button id="btn-refresh" class="px-3 py-1 bg-indigo-600 text-white rounded-md">Refresh</button>
+          <h3 class="font-semibold">Trades Journal</h3>
+          <div class="flex gap-2 items-center flex-wrap">
+            <input id="filter-instrument" placeholder="Symbol..." class="border p-1.5 rounded text-sm w-28" />
+            <select id="filter-system" class="border p-1.5 rounded text-sm w-32">
+              <option value="">All Systems</option>
+            </select>
+            <select id="filter-period" class="border p-1.5 rounded text-sm">
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="custom">Custom...</option>
+            </select>
+            <input id="filter-date-from" type="date" class="border p-1.5 rounded text-sm hidden" />
+            <input id="filter-date-to" type="date" class="border p-1.5 rounded text-sm hidden" />
+            <select id="filter-status" class="border p-1.5 rounded text-sm">
+              <option value="">All Status</option>
+              <option value="Open">Open</option>
+              <option value="Closed">Closed</option>
+            </select>
+            <select id="filter-direction" class="border p-1.5 rounded text-sm">
+              <option value="">All Dirs</option>
+              <option value="Long">Long</option>
+              <option value="Short">Short</option>
+            </select>
+            <button id="btn-refresh" class="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-sm">Apply</button>
+            <button id="btn-trades-clear" class="px-2 py-1.5 text-gray-500 text-sm hover:text-gray-700">Clear</button>
+            <button id="btn-export-trades-xlsx" class="px-3 py-1.5 bg-green-600 text-white rounded-md text-sm">📥
+              Excel</button>
           </div>
         </div>
 
         <div class="table-scroll">
-          <table class="w-full text-sm">
+          <table id="trades-table" class="w-full text-sm text-left">
             <thead class="bg-gray-50 sticky top-0">
               <tr>
                 <th class="sortable" data-key="date">Date</th>
@@ -524,24 +978,50 @@
       <section id="view-kanban" class="tab-view hidden h-full overflow-hidden">
         <div class="flex justify-between items-center mb-4">
           <h3 class="font-semibold">Trade Pipeline</h3>
-          <button id="refresh-kanban" class="px-2 py-1 bg-gray-200 rounded text-xs">Refresh</button>
+          <div class="flex gap-2">
+            <select id="kanban-filter-period" class="border p-1 rounded text-sm">
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+            </select>
+            <button id="refresh-kanban" class="px-2 py-1 bg-gray-200 rounded text-xs">Refresh</button>
+          </div>
         </div>
         <div class="flex gap-4 h-[calc(100vh-140px)] overflow-x-auto pb-4">
           <!-- Columns: Watchlist, Pending, Open, Closed -->
-          <div class="w-80 flex-shrink-0 flex flex-col bg-gray-100 rounded-lg max-h-full kanban-col" data-status="Watchlist">
-            <div class="p-3 font-semibold text-gray-600 border-b bg-gray-200 rounded-t-lg">Watchlist / Ideas</div>
+          <div class="w-80 flex-shrink-0 flex flex-col bg-gray-100 rounded-lg max-h-full kanban-col"
+            data-status="Watchlist">
+            <div
+              class="p-3 font-semibold text-gray-600 border-b bg-gray-200 rounded-t-lg flex justify-between items-center">
+              <span>Watchlist / Ideas</span>
+              <span id="badge-kanban-watchlist"
+                class="bg-gray-300 text-gray-700 text-xs px-2 py-0.5 rounded-full">0</span>
+            </div>
             <div id="kanban-watchlist" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
           <div class="w-80 flex-shrink-0 flex flex-col bg-blue-50 rounded-lg max-h-full kanban-col" data-status="Open">
-            <div class="p-3 font-semibold text-blue-800 border-b bg-blue-100 rounded-t-lg">Open Positions</div>
+            <div
+              class="p-3 font-semibold text-blue-800 border-b bg-blue-200 rounded-t-lg flex justify-between items-center">
+              <span>Open Positions</span>
+              <span id="badge-kanban-open" class="bg-blue-300 text-blue-800 text-xs px-2 py-0.5 rounded-full">0</span>
+            </div>
             <div id="kanban-open" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
           <div class="w-80 flex-shrink-0 flex flex-col bg-green-50 rounded-lg max-h-full kanban-col" data-status="Wins">
-            <div class="p-3 font-semibold text-green-800 border-b bg-green-100 rounded-t-lg">Winners (Closed)</div>
+            <div
+              class="p-3 font-semibold text-green-800 border-b bg-green-200 rounded-t-lg flex justify-between items-center">
+              <span>Winners (Closed)</span>
+              <span id="badge-kanban-wins" class="bg-green-300 text-green-800 text-xs px-2 py-0.5 rounded-full">0</span>
+            </div>
             <div id="kanban-wins" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
           <div class="w-80 flex-shrink-0 flex flex-col bg-red-50 rounded-lg max-h-full kanban-col" data-status="Losses">
-            <div class="p-3 font-semibold text-red-800 border-b bg-red-100 rounded-t-lg">Losses (Closed)</div>
+            <div
+              class="p-3 font-semibold text-red-800 border-b bg-red-200 rounded-t-lg flex justify-between items-center">
+              <span>Losses (Closed)</span>
+              <span id="badge-kanban-losses" class="bg-red-300 text-red-800 text-xs px-2 py-0.5 rounded-full">0</span>
+            </div>
             <div id="kanban-losses" class="p-2 overflow-y-auto flex-1 space-y-2"></div>
           </div>
         </div>
@@ -582,7 +1062,7 @@
         <div class="mt-6">
           <div class="font-semibold mb-3">Performance by Tag</div>
           <div class="table-scroll rounded-card overflow-hidden border">
-            <table class="w-full text-sm">
+            <table class="w-full text-sm text-left">
               <thead class="bg-gray-50">
                 <tr>
                   <th>Tag</th>
@@ -602,11 +1082,13 @@
       <section id="view-pnl" class="tab-view hidden bg-white rounded-card p-4">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
           <h3 class="font-semibold mb-2 md:mb-0">PnL & Positions</h3>
-          
+
           <!-- Robust Filter Bar -->
           <div class="flex flex-wrap gap-2 text-sm bg-gray-50 p-2 rounded w-full md:w-auto">
             <input type="text" id="pnl-filter-inst" placeholder="Symbol..." class="border p-1 rounded w-24">
-            <select id="pnl-filter-sys" class="border p-1 rounded w-32"><option value="">All Systems</option></select>
+            <select id="pnl-filter-sys" class="border p-1 rounded w-32">
+              <option value="">All Systems</option>
+            </select>
             <select id="pnl-filter-period" class="border p-1 rounded w-32">
               <option value="all">All Time</option>
               <option value="today">Today</option>
@@ -614,15 +1096,18 @@
               <option value="month">This Month</option>
               <option value="ytd">YTD</option>
             </select>
-            <button id="pnl-filter-btn" class="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">Apply</button>
+            <button id="pnl-filter-btn"
+              class="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700">Apply</button>
             <button id="pnl-filter-clear" class="text-gray-500 hover:text-gray-800 px-2 py-1 text-xs">Clear</button>
+            <button id="btn-export-pnl-xlsx" class="px-3 py-1 bg-green-600 text-white rounded-md text-sm">📥
+              Excel</button>
           </div>
         </div>
 
         <div class="mb-6">
           <h4 class="font-semibold text-blue-800 border-b pb-1 mb-2">Open Positions</h4>
           <div class="table-scroll">
-            <table class="w-full text-sm">
+            <table class="w-full text-sm text-left">
               <thead class="bg-blue-50">
                 <tr>
                   <th>Date</th>
@@ -637,13 +1122,20 @@
                 </tr>
               </thead>
               <tbody id="pnl-open"></tbody>
+              <tfoot class="bg-blue-100 border-t-2">
+                <tr>
+                  <td colspan="6" class="p-2 text-right font-bold text-blue-800">Total Unrealized:</td>
+                  <td id="pnl-total-unrealized" class="font-bold p-2 text-gray-500">—</td>
+                  <td colspan="2"></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
         <div>
           <h4 class="font-semibold text-gray-800 border-b pb-1 mb-2">Closed Trades</h4>
           <div class="table-scroll">
-            <table class="w-full text-sm">
+            <table class="w-full text-sm text-left">
               <thead class="bg-gray-100">
                 <tr>
                   <th>Date</th>
@@ -720,6 +1212,32 @@
         </div>
       </section>
 
+      <!-- ADMIN / USERS -->
+      <section id="view-admin" class="tab-view hidden bg-white rounded-card p-5">
+        <h2 class="text-xl font-bold mb-4">Admin Dashboard (Master View)</h2>
+        <p class="text-gray-500 text-sm mb-6">Overview of all active accounts in the local database. Data cannot be
+          accessed across accounts without explicit authorization.</p>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm whitespace-nowrap data-table">
+            <thead class="bg-gray-50 dark:bg-gray-800 text-gray-500">
+              <tr>
+                <th class="p-3 font-semibold">User ID</th>
+                <th class="p-3 font-semibold">Username</th>
+                <th class="p-3 font-semibold">Trades Count</th>
+                <th class="p-3 font-semibold">Systems Count</th>
+                <th class="p-3 font-semibold text-right pr-6">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-users-tbody" class="divide-y divide-gray-100 dark:divide-gray-800">
+              <tr>
+                <td colspan="5" class="p-4 text-center text-gray-400">Loading accounts...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
     </main>
 
     <!-- FLOATING QUICK TRADE BUTTON -->
@@ -749,15 +1267,124 @@
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 mb-1">Exit Price</label>
-            <input type="number" id="modal-close-price" class="w-full p-2 border rounded" step="0.05" placeholder="0.00">
+            <input type="number" id="modal-close-price" class="w-full p-2 border rounded" step="0.05"
+              placeholder="0.00">
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-500 mb-1">Exit Date (Optional)</label>
             <input type="date" id="modal-close-date" class="w-full p-2 border rounded">
           </div>
-          <button id="btn-modal-submit-close" class="w-full py-2 bg-red-600 text-white font-bold rounded hover:bg-red-700 transition">Confirm Close</button>
+          <div id="modal-hedge-close-group" class="hidden pt-3 border-t border-gray-200">
+            <label class="block text-xs font-bold text-blue-600 mb-1">Hedge Exit Price (<span
+                id="modal-close-hedge-inst"></span>)</label>
+            <input type="number" id="modal-close-price-hedge" class="w-full p-2 border rounded border-blue-300"
+              step="0.05" placeholder="0.00">
+          </div>
+          <button id="btn-modal-submit-close"
+            class="w-full py-2 mt-4 bg-red-600 text-white font-bold rounded hover:bg-red-700 transition">Confirm
+            Close</button>
         </div>
       </div>
+    </div>
+
+    <!-- EDIT CLOSE PRICE MODAL -->
+    <div id="modal-edit-close"
+      class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+      <div class="bg-white rounded-lg shadow-xl p-6 w-[350px] max-w-full m-4">
+        <div class="flex justify-between items-center mb-4 border-b pb-2">
+          <h3 class="font-bold text-lg text-orange-600">Edit Exit Price</h3>
+          <button id="btn-modal-edit-close-x" class="text-gray-400 hover:text-gray-600 text-xl font-bold">×</button>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 mb-1">Instrument Close Price</label>
+            <input type="number" id="modal-edit-close-price" class="w-full p-2 border rounded" step="0.05">
+          </div>
+          <div id="modal-edit-hedge-close-group" class="hidden">
+            <label class="block text-xs font-bold text-blue-600 mb-1">Hedge Close Price</label>
+            <input type="number" id="modal-edit-close-price-hedge" class="w-full p-2 border rounded border-blue-300"
+              step="0.05">
+          </div>
+          <button id="btn-modal-submit-edit-close"
+            class="w-full py-2 mt-4 bg-orange-500 text-white font-bold rounded hover:bg-orange-600 transition">Save
+            Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRADE INFO MODAL -->
+    <div id="modal-trade-info"
+      class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+      <div class="bg-white rounded-lg shadow-xl p-6 w-[450px] max-w-full m-4">
+        <div class="flex justify-between items-center mb-4 border-b pb-2">
+          <h3 class="font-bold text-lg text-indigo-900 border-l-4 border-indigo-500 pl-2">Trade Details</h3>
+          <button id="btn-modal-trade-info-close" class="text-gray-400 hover:text-gray-600 text-xl font-bold">×</button>
+        </div>
+        <div id="modal-trade-info-body" class="space-y-4 text-gray-800"></div>
+      </div>
+    </div>
+
+    <!-- Confirm Dialog -->
+    <div id="modal-confirm" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+      <div class="bg-white rounded-lg shadow-xl p-6 w-[360px] max-w-full m-4">
+        <p id="modal-confirm-msg" class="text-gray-800 font-medium mb-5 text-center"></p>
+        <div class="flex gap-3">
+          <button id="modal-confirm-cancel"
+            class="flex-1 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium">Cancel</button>
+          <button id="modal-confirm-ok"
+            class="flex-1 py-2 bg-red-600 text-white rounded hover:bg-red-700 font-bold">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTH MODAL -->
+  <div id="modal-auth"
+    class="fixed inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center z-[1000] backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md transform transition-all border border-gray-100">
+      <div class="text-center mb-8">
+        <div class="inline-block p-4 bg-indigo-50 rounded-2xl mb-4">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 15V17M12 7V11M8 21H16C18.2091 21 20 19.2091 20 17V7C20 4.79086 18.2091 3 16 3H8C5.79086 3 4 4.79086 4 7V17C4 19.2091 5.79086 21 8 21Z"
+              stroke="#4F46E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </div>
+        <h2 class="text-3xl font-bold text-gray-900 mb-1">Risk Engine</h2>
+        <p class="text-gray-500 text-sm">Standalone Trading Workspace</p>
+      </div>
+
+      <div id="auth-error"
+        class="mb-5 p-3 bg-red-50 text-red-600 text-xs rounded-lg border border-red-100 hidden flex items-center gap-2">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span id="auth-error-msg">Invalid credentials</span>
+      </div>
+
+      <div class="space-y-5">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Username</label>
+          <input id="auth-user" type="text" placeholder="your_name"
+            class="w-full border border-gray-200 p-3.5 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all bg-gray-50 text-gray-900" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Password</label>
+          <input id="auth-pass" type="password" placeholder="••••••••"
+            class="w-full border border-gray-200 p-3.5 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 outline-none transition-all bg-gray-50 text-gray-900" />
+        </div>
+        <div class="pt-4 space-y-3">
+          <button id="btn-login-submit"
+            class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg hover:shadow-indigo-200 transition-all transform active:scale-[0.98]">Login</button>
+          <button id="btn-signup-submit"
+            class="w-full bg-white hover:bg-gray-50 text-indigo-600 border-2 border-indigo-50 font-bold py-4 rounded-xl transition-all">Create
+            Account</button>
+        </div>
+      </div>
+      <p class="mt-8 text-center text-[10px] text-gray-400 font-medium uppercase tracking-widest">Powered by Static
+        Local Engine</p>
     </div>
   </div>
 

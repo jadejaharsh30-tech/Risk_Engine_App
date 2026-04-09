@@ -1,5 +1,55 @@
 // app.js — Bundled Risk Engine (Universal Compatibility)
 
+const Auth = {
+  async signup(username, password) {
+    const res = await fetch('/api/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Signup failed');
+    }
+    return true;
+  },
+  async login(username, password) {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    if (!res.ok) throw new Error('Invalid credentials');
+    const data = await res.json();
+    this.updateUI(data.username);
+    return true;
+  },
+  async logout() {
+    await fetch('/api/logout', { method: 'POST' });
+    location.reload();
+  },
+  async deleteAccount() {
+    const res = await fetch('/api/delete_account', { method: 'POST' });
+    if (!res.ok) throw new Error('Account deletion failed');
+    location.reload();
+  },
+  updateUI(username) {
+    const modal = document.getElementById('modal-auth');
+    const profile = document.getElementById('user-profile');
+    if (username) {
+      if (modal) modal.classList.add('hidden');
+      if (profile) {
+        profile.classList.remove('hidden');
+        document.getElementById('user-display-name').textContent = username;
+        document.getElementById('user-initials').textContent = username[0].toUpperCase();
+      }
+    } else {
+      if (modal) modal.classList.remove('hidden');
+      if (profile) profile.classList.add('hidden');
+    }
+  }
+};
+
 // ==========================================
 // 1. CALC MODULE
 // ==========================================
@@ -30,7 +80,7 @@ const Calc = {
   computeWinRate(trades) {
     const closed = trades.filter(t => t.status === 'Closed');
     if (!closed.length) return null;
-    const wins = closed.filter(t => t.realized_pnl > 0).length;
+    const wins = closed.filter(t => Number(t.realized_pnl || 0) >= 0).length;
     return (wins / closed.length) * 100;
   },
 
@@ -55,7 +105,7 @@ const Calc = {
     let sum = 0, count = 0;
     closed.forEach(t => {
       const sys = systems.find(s => s.name === t.system);
-      const R = sys ? (sys.R || 0) : 0;
+      const R = t.R_at_entry || (sys ? (sys.R || 0) : 0);
       if (R && t.realized_pnl != null) {
         sum += (t.realized_pnl / R);
         count++;
@@ -74,14 +124,14 @@ const Calc = {
       const dd = (peak - cum);
       if (dd > maxdd) maxdd = dd;
     });
-    const peakVal = peak || 1;
-    return (maxdd / peakVal) * 100;
+    if (peak <= 0) return null; // No profitable peak — can't compute meaningful %
+    return (maxdd / peak) * 100;
   },
 
   computeSystemMetrics(sys, trades) {
     const openTrades = trades.filter(t => t.system === sys.name && t.status === 'Open');
     const closedTrades = trades.filter(t => t.system === sys.name && t.status === 'Closed');
-    const riskInPlay = openTrades.reduce((a, b) => a + Number(b.actual_risk || 0), 0);
+    const riskInPlay = openTrades.reduce((a, b) => a + Number(b.total_risk || b.actual_risk || 0), 0);
     const unrealized = openTrades.reduce((a, b) => {
       const dir = (b.direction === 'Short') ? -1 : 1;
       return a + (dir * (Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0));
@@ -95,16 +145,16 @@ const Calc = {
 
   computeExposure(trades) {
     const open = trades.filter(t => t.status === 'Open');
-    const totalRisk = open.reduce((a, b) => a + Number(b.actual_risk || 0), 0);
+    const totalRisk = open.reduce((a, b) => a + Number(b.total_risk || b.actual_risk || 0), 0);
     const bySystem = {};
     open.forEach(t => {
       if (!bySystem[t.system]) bySystem[t.system] = 0;
-      bySystem[t.system] += Number(t.actual_risk || 0);
+      bySystem[t.system] += Number(t.total_risk || t.actual_risk || 0);
     });
     const byType = { Futures: 0, Options: 0 };
     open.forEach(t => {
       const type = t.optionType ? 'Options' : 'Futures';
-      byType[type] += Number(t.actual_risk || 0);
+      byType[type] += Number(t.total_risk || t.actual_risk || 0);
     });
     return { totalRisk, bySystem, byType };
   },
@@ -142,6 +192,133 @@ const Calc = {
 };
 
 // ==========================================
+// 1B. BUNDLED NSE F&O INSTRUMENT MASTER
+// ==========================================
+const DEFAULT_NSE_MASTER = [
+  // === INDICES ===
+  { symbol: "NIFTY", lot: 75, type: "Futures" },
+  { symbol: "BANKNIFTY", lot: 30, type: "Futures" },
+  { symbol: "FINNIFTY", lot: 60, type: "Futures" },
+  { symbol: "MIDCPNIFTY", lot: 120, type: "Futures" },
+  { symbol: "NIFTYNXT50", lot: 25, type: "Futures" },
+  // === STOCKS ===
+  { symbol: "RELIANCE", lot: 250, type: "Futures" },
+  { symbol: "TCS", lot: 150, type: "Futures" },
+  { symbol: "HDFCBANK", lot: 550, type: "Futures" },
+  { symbol: "INFY", lot: 300, type: "Futures" },
+  { symbol: "ICICIBANK", lot: 700, type: "Futures" },
+  { symbol: "SBIN", lot: 1500, type: "Futures" },
+  { symbol: "BHARTIARTL", lot: 475, type: "Futures" },
+  { symbol: "ITC", lot: 1600, type: "Futures" },
+  { symbol: "KOTAKBANK", lot: 400, type: "Futures" },
+  { symbol: "LT", lot: 150, type: "Futures" },
+  { symbol: "AXISBANK", lot: 625, type: "Futures" },
+  { symbol: "HINDUNILVR", lot: 300, type: "Futures" },
+  { symbol: "BAJFINANCE", lot: 125, type: "Futures" },
+  { symbol: "MARUTI", lot: 100, type: "Futures" },
+  { symbol: "SUNPHARMA", lot: 350, type: "Futures" },
+  { symbol: "TATAMOTORS", lot: 1400, type: "Futures" },
+  { symbol: "TATASTEEL", lot: 5500, type: "Futures" },
+  { symbol: "WIPRO", lot: 1500, type: "Futures" },
+  { symbol: "HCLTECH", lot: 350, type: "Futures" },
+  { symbol: "ADANIENT", lot: 250, type: "Futures" },
+  { symbol: "ADANIPORTS", lot: 625, type: "Futures" },
+  { symbol: "POWERGRID", lot: 2700, type: "Futures" },
+  { symbol: "NTPC", lot: 2250, type: "Futures" },
+  { symbol: "ASIANPAINT", lot: 300, type: "Futures" },
+  { symbol: "NESTLEIND", lot: 200, type: "Futures" },
+  { symbol: "ULTRACEMCO", lot: 100, type: "Futures" },
+  { symbol: "TITAN", lot: 175, type: "Futures" },
+  { symbol: "BAJAJFINSV", lot: 500, type: "Futures" },
+  { symbol: "TECHM", lot: 600, type: "Futures" },
+  { symbol: "ONGC", lot: 3850, type: "Futures" },
+  { symbol: "COALINDIA", lot: 1400, type: "Futures" },
+  { symbol: "JSWSTEEL", lot: 675, type: "Futures" },
+  { symbol: "M&M", lot: 350, type: "Futures" },
+  { symbol: "CIPLA", lot: 650, type: "Futures" },
+  { symbol: "DRREDDY", lot: 125, type: "Futures" },
+  { symbol: "EICHERMOT", lot: 150, type: "Futures" },
+  { symbol: "GRASIM", lot: 250, type: "Futures" },
+  { symbol: "HEROMOTOCO", lot: 150, type: "Futures" },
+  { symbol: "HINDALCO", lot: 1075, type: "Futures" },
+  { symbol: "INDUSINDBK", lot: 500, type: "Futures" },
+  { symbol: "DIVISLAB", lot: 175, type: "Futures" },
+  { symbol: "APOLLOHOSP", lot: 125, type: "Futures" },
+  { symbol: "BPCL", lot: 1800, type: "Futures" },
+  { symbol: "BRITANNIA", lot: 200, type: "Futures" },
+  { symbol: "SBILIFE", lot: 375, type: "Futures" },
+  { symbol: "HDFCLIFE", lot: 1100, type: "Futures" },
+  { symbol: "TATACONSUM", lot: 500, type: "Futures" },
+  { symbol: "PIDILITIND", lot: 250, type: "Futures" },
+  { symbol: "VEDL", lot: 1550, type: "Futures" },
+  { symbol: "HAL", lot: 150, type: "Futures" },
+  { symbol: "DLF", lot: 825, type: "Futures" },
+  { symbol: "IOC", lot: 4850, type: "Futures" },
+  { symbol: "BANKBARODA", lot: 2925, type: "Futures" },
+  { symbol: "PNB", lot: 8000, type: "Futures" },
+  { symbol: "TRENT", lot: 100, type: "Futures" },
+  { symbol: "ZOMATO", lot: 2600, type: "Futures" },
+  { symbol: "JIOFIN", lot: 2500, type: "Futures" },
+  { symbol: "IRCTC", lot: 575, type: "Futures" },
+  { symbol: "SIEMENS", lot: 75, type: "Futures" },
+  { symbol: "ABB", lot: 125, type: "Futures" },
+  { symbol: "GODREJCP", lot: 500, type: "Futures" },
+  { symbol: "AMBUJACEM", lot: 750, type: "Futures" },
+  { symbol: "SHREECEM", lot: 25, type: "Futures" },
+  { symbol: "INDIGO", lot: 175, type: "Futures" },
+  { symbol: "BEL", lot: 2450, type: "Futures" },
+  { symbol: "TATAPOWER", lot: 1350, type: "Futures" },
+  { symbol: "PEL", lot: 550, type: "Futures" },
+  { symbol: "SAIL", lot: 5700, type: "Futures" },
+  { symbol: "MRF", lot: 5, type: "Futures" },
+  { symbol: "BAJAJ-AUTO", lot: 125, type: "Futures" },
+  { symbol: "DABUR", lot: 1050, type: "Futures" },
+  { symbol: "MFSL", lot: 500, type: "Futures" },
+  { symbol: "LICHSGFIN", lot: 850, type: "Futures" },
+  { symbol: "CANBK", lot: 5600, type: "Futures" },
+  { symbol: "RECLTD", lot: 1400, type: "Futures" },
+  { symbol: "PFC", lot: 1600, type: "Futures" },
+  { symbol: "BHEL", lot: 2625, type: "Futures" },
+  { symbol: "NMDC", lot: 3350, type: "Futures" },
+  { symbol: "IDFCFIRSTB", lot: 7500, type: "Futures" },
+  { symbol: "MUTHOOTFIN", lot: 275, type: "Futures" },
+  { symbol: "MANAPPURAM", lot: 4000, type: "Futures" },
+  { symbol: "PAGEIND", lot: 15, type: "Futures" },
+  { symbol: "LALPATHLAB", lot: 175, type: "Futures" },
+  { symbol: "COLPAL", lot: 200, type: "Futures" },
+  { symbol: "BERGEPAINT", lot: 1100, type: "Futures" },
+  { symbol: "IDEA", lot: 50000, type: "Futures" },
+  { symbol: "FEDERALBNK", lot: 5000, type: "Futures" },
+  { symbol: "NATIONALUM", lot: 4000, type: "Futures" },
+  { symbol: "BANDHANBNK", lot: 2700, type: "Futures" },
+  { symbol: "EXIDEIND", lot: 1200, type: "Futures" },
+  { symbol: "BALKRISIND", lot: 200, type: "Futures" },
+  { symbol: "PERSISTENT", lot: 150, type: "Futures" },
+  { symbol: "POLYCAB", lot: 100, type: "Futures" },
+  { symbol: "COFORGE", lot: 75, type: "Futures" },
+  { symbol: "LTTS", lot: 100, type: "Futures" },
+  { symbol: "NAUKRI", lot: 75, type: "Futures" },
+  { symbol: "MPHASIS", lot: 175, type: "Futures" },
+  { symbol: "POWERINDIA", lot: 50, type: "Futures" },
+  { symbol: "JINDALSTEL", lot: 500, type: "Futures" },
+  { symbol: "OFSS", lot: 75, type: "Futures" },
+];
+
+/**
+ * Returns the effective instrument master list.
+ * Priority: user-uploaded list (localStorage) > user-added instruments > bundled default.
+ */
+function getInstrumentMaster() {
+  // Check for user-uploaded master
+  const uploaded = localStorage.getItem('nse_fo_master_uploaded');
+  const base = uploaded ? JSON.parse(uploaded) : DEFAULT_NSE_MASTER;
+  // Merge with any user-added instruments (avoiding dups by symbol)
+  const symbols = new Set(base.map(i => i.symbol.toUpperCase()));
+  const extras = (store.state.instruments || []).filter(i => !symbols.has(i.symbol.toUpperCase()));
+  return [...base, ...extras];
+}
+
+// ==========================================
 // 2. STORE MODULE
 // ==========================================
 const LS_KEY = "risk_engine_pro_v1";
@@ -150,26 +327,58 @@ const initialState = { systems: [], instruments: [], trades: [] };
 const store = {
   state: { ...initialState },
 
-  load() {
+  async load() {
+    this.state = { ...initialState };
     try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        this.state = JSON.parse(raw);
+      const res = await fetch('/api/load_state');
+      if (res.status === 401) {
+        Auth.updateUI(null);
+        return;
+      }
+      if (res.ok) {
+        const remoteState = await res.json();
+        this.state = remoteState;
         if (!this.state.systems) this.state.systems = [];
         if (!this.state.instruments) this.state.instruments = [];
         if (!this.state.trades) this.state.trades = [];
-      } else {
-        this.save();
+
+        Auth.updateUI(remoteState.username || 'User');
+
+        const adminTab = document.getElementById('nav-tab-admin');
+        if (adminTab) {
+          if (remoteState.is_admin) {
+            adminTab.classList.remove('hidden');
+          } else {
+            adminTab.classList.add('hidden');
+          }
+        }
+
+        return;
       }
     } catch (e) {
       console.error("Failed to load state", e);
-      this.state = { ...initialState };
     }
   },
 
-  save() {
+  async save() {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(this.state));
+      const res = await fetch('/api/save_state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: this.state })
+      });
+      if (res.status === 401) {
+        Auth.updateUI(null);
+        return;
+      }
+
+      const ind = document.getElementById('save-indicator');
+      if (ind) {
+        ind.textContent = 'Saved ✓';
+        ind.style.opacity = '1';
+        clearTimeout(ind._timer);
+        ind._timer = setTimeout(() => { ind.style.opacity = '0'; }, 1500);
+      }
     } catch (e) {
       console.error("Failed to save state", e);
     }
@@ -285,16 +494,29 @@ const Charts = (function () {
 // ==========================================
 const $ = (s) => document.querySelector(s);
 
+function formatPF(pf) {
+  if (pf === null) return '—';
+  if (!isFinite(pf)) return '∞';
+  return pf.toFixed(2);
+}
+
 const UI = {
   renderDashboard() {
     const { systems, trades } = store.state;
     // Aggregates
     const totalCapital = systems.reduce((a, b) => a + Number(b.capital || 0), 0);
-    const totalRisk = trades.filter(t => t.status === 'Open').reduce((a, b) => a + Number(b.actual_risk || 0), 0);
+    const totalRisk = trades.filter(t => t.status === 'Open').reduce((a, b) => a + Number(b.total_risk || b.actual_risk || 0), 0);
     const realized = trades.filter(t => t.status === 'Closed').reduce((a, b) => a + Number(b.realized_pnl || 0), 0);
     const unreal = trades.filter(t => t.status === 'Open').reduce((a, b) => {
       const dir = (b.direction === 'Short') ? -1 : 1;
-      return a + (dir * (Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0));
+      let pnl = 0;
+      if (b.mark_price != null) {
+        pnl += (dir * (Number(b.mark_price || 0) - Number(b.entry || 0)) * Number(b.final_qty || 0));
+      }
+      if (b.hedge && b.hedge.mark_price != null) {
+        pnl += (Number(b.hedge.mark_price) - Number(b.hedge.entry || 0)) * Number(b.hedge.qty || 0);
+      }
+      return a + pnl;
     }, 0);
 
     if ($('#sum-capital')) $('#sum-capital').textContent = Calc.money(totalCapital);
@@ -309,7 +531,12 @@ const UI = {
     const tradesSorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
     tradesSorted.forEach(t => {
       const dir = (t.direction === 'Short') ? -1 : 1;
-      const pnl = (t.status === 'Closed') ? Number(t.realized_pnl || 0) : (dir * (Number(t.mark_price || 0) - Number(t.entry || 0)) * Number(t.final_qty || 0));
+      let pnl = 0;
+      if (t.status === 'Closed') {
+        pnl = Number(t.realized_pnl || 0);
+      } else if (t.mark_price != null) {
+        pnl = dir * (Number(t.mark_price) - Number(t.entry || 0)) * Number(t.final_qty || 0);
+      }
       cum += pnl;
       points.push({ x: t.date, y: Number((cum / 100000).toFixed(2)) });
     });
@@ -320,7 +547,7 @@ const UI = {
     const pf = Calc.computeProfitFactor(trades);
     const avg = Calc.computeAvgTrade(trades);
     if ($('#stat-win')) $('#stat-win').textContent = win === null ? '—' : win.toFixed(1) + '%';
-    if ($('#stat-pf')) $('#stat-pf').textContent = pf === null ? '—' : pf.toFixed(2);
+    if ($('#stat-pf')) $('#stat-pf').textContent = formatPF(pf);
     if ($('#stat-avg')) $('#stat-avg').textContent = avg === null ? '—' : Calc.money(avg);
 
     const tbody = $('#dashboard-table-body');
@@ -340,12 +567,39 @@ const UI = {
     const dailyPnL = Calc.getDailyRealizedPnL(trades);
     if ($('#risk-daily-pnl')) {
       $('#risk-daily-pnl').textContent = Calc.money(dailyPnL);
-      if (dailyPnL < -20000) {
-        $('#risk-daily-pnl').classList.add('text-red-600');
-        $('#risk-daily-warning').classList.remove('hidden');
-      } else {
-        $('#risk-daily-pnl').classList.remove('text-red-600');
-        $('#risk-daily-warning').classList.add('hidden');
+      const portfolioLimit = store.state.systems.reduce((sum, s) => sum + Number(s.daily_loss_limit || 20000), 0);
+      const breached = dailyPnL < -portfolioLimit;
+
+      if ($('#risk-daily-pnl')) {
+        $('#risk-daily-pnl').textContent = Calc.money(dailyPnL);
+        $('#risk-daily-pnl').className = 'font-bold text-lg ' + (breached ? 'text-red-600' : '');
+        if ($('#risk-daily-warning')) {
+          $('#risk-daily-limit-val').textContent = Calc.money(portfolioLimit);
+          breached ? $('#risk-daily-warning').classList.remove('hidden') : $('#risk-daily-warning').classList.add('hidden');
+        }
+      }
+
+      const saveBtn = document.getElementById('save-trade');
+      if (saveBtn) {
+        saveBtn.disabled = breached;
+        saveBtn.title = breached ? 'Daily loss limit reached — trading halted' : '';
+        saveBtn.className = breached
+          ? 'px-4 py-2 bg-gray-400 text-white rounded-md cursor-not-allowed opacity-60 mt-4'
+          : 'px-4 py-2 bg-green-600 text-white rounded-md mt-4';
+      }
+
+      let banner = document.getElementById('cb-banner');
+      if (breached) {
+        if (!banner) {
+          banner = document.createElement('div');
+          banner.id = 'cb-banner';
+          banner.className = 'mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-semibold flex items-center gap-2';
+          banner.innerHTML = '⛔ Circuit Breaker Active — Daily loss limit reached. New trades are blocked.';
+          const form = document.getElementById('view-newtrade');
+          if (form) form.prepend(banner);
+        }
+      } else if (banner) {
+        banner.remove();
       }
     }
     if ($('#risk-total-exposure')) $('#risk-total-exposure').textContent = Calc.money(exposure.totalRisk);
@@ -365,6 +619,7 @@ const UI = {
       tr.innerHTML = `<td class="p-2"><input data-idx="${idx}" data-field="name" class="w-full border p-1 rounded text-sm" value="${s.name}"></td>
         <td><input data-idx="${idx}" data-field="capital" class="w-full border p-1 rounded text-sm" value="${s.capital}"></td>
         <td><input data-idx="${idx}" data-field="R" class="w-full border p-1 rounded text-sm" value="${s.R}"></td>
+        <td><input data-idx="${idx}" data-field="daily_loss_limit" class="w-full border p-1 rounded text-sm" value="${s.daily_loss_limit || 20000}" title="Daily max loss (₹)"></td>
         <td class="p-2 max-trades-cell">${max}</td>
         <td class="p-2"><button data-idx="${idx}" class="del-system text-red-600">Delete</button></td>`;
       tbody.appendChild(tr);
@@ -385,12 +640,22 @@ const UI = {
       });
     });
     tbody.querySelectorAll('.del-system').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!confirm('Delete system?')) return;
+      btn.addEventListener('click', async () => {
+        if (!await showConfirm('Delete system?')) return;
         store.removeSystem(btn.dataset.idx);
         UI.renderSystems();
       });
     });
+
+    const sysList = $('#sys-list');
+    if (sysList) {
+      sysList.innerHTML = '';
+      store.state.systems.forEach(s => {
+        const o = document.createElement('option');
+        o.value = s.name;
+        sysList.appendChild(o);
+      });
+    }
   },
 
   renderInstruments() {
@@ -415,8 +680,8 @@ const UI = {
       });
     });
     tbody.querySelectorAll('.del-instrument').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!confirm('Delete instrument?')) return;
+      btn.addEventListener('click', async () => {
+        if (!await showConfirm('Delete instrument?')) return;
         store.removeInstrument(btn.dataset.idx);
         UI.renderInstruments();
       });
@@ -427,11 +692,70 @@ const UI = {
   _tradeSortKey: 'date',
   _tradeSortDir: 'desc',
 
+  showTradeInfoModal(t) {
+    const modal = document.querySelector('#modal-trade-info');
+    if (!modal) return;
+    const body = document.querySelector('#modal-trade-info-body');
+    const dirTxt = t.direction === 'Short' ? '<span class="text-red-500 font-bold">SHORT</span>' : '<span class="text-green-600 font-bold">LONG</span>';
+    let statusPill = '<span class="pill pill-open">OPEN</span>';
+    if (t.status === 'Closed') {
+      statusPill = Number(t.realized_pnl) >= 0 ? '<span class="pill pill-win">WIN</span>' : '<span class="pill pill-loss">LOSS</span>';
+    }
+
+    let pnlDisplay = '';
+    if (t.status === 'Closed') {
+      pnlDisplay = `<div><span class="muted text-xs block">Realized PnL</span><b class="${Number(t.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(t.realized_pnl)}</b></div>`;
+    }
+
+    body.innerHTML = `
+      <div class="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
+        <div><span class="muted text-xs block">Date</span><b>${t.date}</b></div>
+        <div><span class="muted text-xs block">Instrument</span><b>${t.instrument}</b></div>
+        <div><span class="muted text-xs block">System</span><b>${t.system}</b></div>
+        <div><span class="muted text-xs block">Direction</span><b>${dirTxt}</b></div>
+        <div><span class="muted text-xs block">Entry</span><b>${t.entry}</b></div>
+        <div><span class="muted text-xs block">Exit</span><b>${t.exit || '-'}</b></div>
+        <div><span class="muted text-xs block">Final Qty</span><b>${t.final_qty}</b></div>
+        <div><span class="muted text-xs block">Risk</span><b>${Calc.money(t.total_risk || t.actual_risk)}</b></div>
+        <div><span class="muted text-xs block">Tags</span><b>${(t.tags || []).join(', ') || '-'}</b></div>
+        <div><span class="muted text-xs block">Status</span><b>${statusPill}</b></div>
+        ${pnlDisplay}
+        ${t.hedge ? `<div class="col-span-2 pt-2 border-t mt-1"><span class="muted text-xs block">Hedge</span><b>${t.hedge.strike} ${t.hedge.type} at Entry: ${t.hedge.entry} (Qty: ${t.hedge.qty})</b></div>` : ''}
+        ${t.notes ? `<div class="col-span-2 pt-2 border-t mt-1"><span class="muted text-xs block">Notes</span><p class="whitespace-pre-wrap">${t.notes}</p></div>` : ''}
+      </div>
+    `;
+    modal.classList.remove('hidden');
+    document.querySelector('#btn-modal-trade-info-close').onclick = () => modal.classList.add('hidden');
+  },
+
   renderTrades(editCallback, highlightId = null) {
     const tbody = $('#trades-tbody'); if (!tbody) return;
     tbody.innerHTML = '';
     const filtSys = $('#filter-system') ? $('#filter-system').value.trim() : '';
     const filtInst = $('#filter-instrument') ? $('#filter-instrument').value.trim().toUpperCase() : '';
+    const filtPeriod = $('#filter-period') ? $('#filter-period').value : 'all';
+    const filtStatus = $('#filter-status') ? $('#filter-status').value : '';
+    const filtDir = $('#filter-direction') ? $('#filter-direction').value : '';
+    const filtDateFrom = $('#filter-date-from') ? $('#filter-date-from').value : '';
+    const filtDateTo = $('#filter-date-to') ? $('#filter-date-to').value : '';
+
+    // Populate Systems dropdown if empty
+    // Populate Systems dropdown
+    const sysSelect = $('#filter-system');
+    if (sysSelect && sysSelect.tagName === 'SELECT') {
+      const currentVal = sysSelect.value;
+      sysSelect.innerHTML = '<option value="">All Systems</option>';
+      store.state.systems.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.name; opt.textContent = s.name;
+        sysSelect.appendChild(opt);
+      });
+      sysSelect.value = currentVal;
+    }
+
+    // Show/hide custom date inputs
+    if ($('#filter-date-from')) $('#filter-date-from').classList.toggle('hidden', filtPeriod !== 'custom');
+    if ($('#filter-date-to')) $('#filter-date-to').classList.toggle('hidden', filtPeriod !== 'custom');
 
     // Setup sortable headers
     document.querySelectorAll('#view-trades th.sortable').forEach(th => {
@@ -453,6 +777,25 @@ const UI = {
     let parents = store.state.trades.filter(t => !t.parent_id);
     if (filtSys) parents = parents.filter(t => t.system === filtSys);
     if (filtInst) parents = parents.filter(t => t.instrument.toUpperCase().includes(filtInst) || (t.tags || []).some(tt => tt.toUpperCase().includes(filtInst)));
+    if (filtStatus) parents = parents.filter(t => t.status === filtStatus);
+    if (filtDir) parents = parents.filter(t => t.direction === filtDir);
+
+    // Time filter — strictly on ENTRY DATE
+    if (filtPeriod !== 'all') {
+      const now = new Date();
+      parents = parents.filter(t => {
+        const d = new Date(t.date);
+        if (filtPeriod === 'today') return d.toDateString() === now.toDateString();
+        if (filtPeriod === 'week') { const w = new Date(now); w.setDate(w.getDate() - 7); return d >= w; }
+        if (filtPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        if (filtPeriod === 'custom') {
+          if (filtDateFrom && d < new Date(filtDateFrom)) return false;
+          if (filtDateTo && d > new Date(filtDateTo + 'T23:59:59')) return false;
+          return true;
+        }
+        return true;
+      });
+    }
 
     // Sort
     const key = UI._tradeSortKey;
@@ -460,7 +803,10 @@ const UI = {
     parents.sort((a, b) => {
       let va = a[key], vb = b[key];
       if (key === 'date') { va = new Date(va); vb = new Date(vb); }
-      else if (['entry', 'exit', 'final_qty', 'actual_risk'].includes(key)) { va = Number(va || 0); vb = Number(vb || 0); }
+      else if (['entry', 'exit', 'final_qty', 'actual_risk', 'total_risk'].includes(key)) {
+        va = Number(a.total_risk || a.actual_risk || 0);
+        vb = Number(b.total_risk || b.actual_risk || 0);
+      }
       else { va = String(va || '').toLowerCase(); vb = String(vb || '').toLowerCase(); }
       return va > vb ? dir : va < vb ? -dir : 0;
     });
@@ -486,14 +832,19 @@ const UI = {
       const children = store.state.trades.filter(c => c.parent_id === t.id);
       const expandBtn = children.length > 0 ? `<span class="expand-btn text-gray-400 text-xs mr-1" data-parent="${t.id}">\u25b6</span>` : '<span class="w-3 inline-block mr-1"></span>';
 
-      tr.innerHTML = `<td class="p-2">${expandBtn}${t.date}</td><td class="text-xs text-gray-400">#${t.id.replace('trade_', '')}</td><td>${t.system}</td><td>${t.instrument} ${hedgeChip}</td><td>${dirBadge}</td>
-        <td>${t.entry}</td><td>${t.exit}</td><td>${t.final_qty}</td><td>${Calc.money(t.actual_risk)}</td>
+      tr.innerHTML = `<td class="p-2">${expandBtn}${t.date}</td><td class="text-xs text-gray-400">#${t.id.replace('trade_', '')}</td><td>${t.system}</td><td><a href="#" class="view-trade-info font-medium text-blue-600 hover:text-blue-800" data-id="${t.id}">${t.instrument}</a> ${hedgeChip}</td><td>${dirBadge}</td>
+        <td>${t.entry}</td><td>${t.exit}</td><td>${t.final_qty}</td><td>${Calc.money(t.total_risk || t.actual_risk)}</td>
         <td>${t.flag}</td><td>${(t.tags || []).join(', ')}</td><td>${statusPill}</td>
-        <td class="row-actions"><button class="edit-trade text-blue-600 hover:text-blue-800 mr-1" title="Edit">\u270f\ufe0f</button><button class="del-trade text-red-500 hover:text-red-700" title="Delete">\ud83d\uddd1\ufe0f</button></td>`;
+        <td class="row-actions">${t.status === 'Closed' && children.length === 0 ? `<button class="btn-edit-close mr-1 text-xs text-orange-500 hover:text-orange-700" data-id="${t.id}" title="Edit Exit Price">\u270f\ufe0f</button>` : ''}<button class="edit-trade text-blue-600 hover:text-blue-800 mr-1" title="Edit">\u270f\ufe0f</button><button class="del-trade text-red-500 hover:text-red-700" title="Delete">\ud83d\uddd1\ufe0f</button></td>`;
       tbody.appendChild(tr);
 
-      tr.querySelector('.del-trade').addEventListener('click', () => {
-        if (!confirm('Delete this trade and all its partial exits?')) return;
+      tr.querySelector('.view-trade-info').addEventListener('click', (e) => {
+        e.preventDefault();
+        UI.showTradeInfoModal(t);
+      });
+
+      tr.querySelector('.del-trade').addEventListener('click', async () => {
+        if (!await showConfirm('Delete this trade and all its partial exits?')) return;
         store.removeTrade(t.id);
         UI.renderTrades(editCallback);
       });
@@ -510,7 +861,7 @@ const UI = {
           cr.className = 'child-row hidden border-b text-xs text-gray-500';
           const childPill = Number(child.realized_pnl) >= 0 ? '<span class="pill pill-win">WIN</span>' : '<span class="pill pill-loss">LOSS</span>';
           cr.innerHTML = `<td class="p-2 pl-7">${child.close_date || child.date}</td><td class="text-gray-300">#${child.id.replace('trade_', '')}</td><td></td><td>Partial Exit</td><td></td>
-            <td>${child.entry}</td><td>${child.close_price || '\u2014'}</td><td>${child.final_qty}</td><td></td>
+            <td>${child.entry}</td><td>${child.close_price || '\u2014'} <button class="btn-edit-close ml-1 text-xs text-orange-500 hover:text-orange-700" data-id="${child.id}" title="Edit Exit Price">\u270f\ufe0f</button></td><td>${child.final_qty}</td><td></td>
             <td></td><td></td><td>${childPill}</td><td class="font-semibold ${Number(child.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(child.realized_pnl)}</td>`;
           childRows.push(cr);
           tbody.appendChild(cr);
@@ -522,10 +873,39 @@ const UI = {
         });
       }
     });
+
+    tbody.querySelectorAll('.btn-edit-close').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const t = store.state.trades.find(x => x.id === btn.dataset.id);
+        if (t) UI.handleEditClosePrice(t);
+      });
+    });
   },
 
   renderKanban() {
-    const { trades } = store.state;
+    let { trades } = store.state;
+
+    // Quick Filter Logic
+    const period = $('#kanban-filter-period') ? $('#kanban-filter-period').value : 'all';
+    if (period !== 'all') {
+      const now = new Date();
+      trades = trades.filter(t => {
+        // Use close_date for closed trades if available, else date
+        const dateStr = t.status === 'Closed' ? (t.close_date || t.date) : t.date;
+        if (!dateStr) return false;
+        const d = new Date(dateStr);
+        if (period === 'today') return d.toDateString() === now.toDateString();
+        if (period === 'week') {
+          const w = new Date(now); w.setDate(w.getDate() - 7); return d >= w;
+        }
+        if (period === 'month') {
+          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        }
+        return true;
+      });
+    }
+
     const cols = { watchlist: $('#kanban-watchlist'), open: $('#kanban-open'), wins: $('#kanban-wins'), losses: $('#kanban-losses') };
     if (!cols.watchlist) return;
     Object.values(cols).forEach(c => c.innerHTML = '');
@@ -570,7 +950,7 @@ const UI = {
 
       const dirLabel = t.direction === 'Short' ? '<span class="text-xs text-red-500 font-bold">\u25bc SHORT</span>' : '<span class="text-xs text-green-600 font-bold">\u25b2 LONG</span>';
       const hedgeLabel = t.hedge && t.hedge.strike ? '<div class="text-xs text-blue-600">\ud83d\udee1\ufe0f Hedge: ' + t.hedge.strike + ' ' + t.hedge.type + '</div>' : '';
-      const centerContent = t.status === 'Closed' ? '<div class="mt-1 font-bold ' + (Number(t.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600') + '">' + Calc.money(t.realized_pnl) + '</div>' : '<div class="mt-1 text-blue-600">Risk: ' + Calc.money(t.actual_risk) + '</div>';
+      const centerContent = t.status === 'Closed' ? '<div class="mt-1 font-bold ' + (Number(t.realized_pnl) >= 0 ? 'text-green-600' : 'text-red-600') + '">' + Calc.money(t.realized_pnl) + '</div>' : '<div class="mt-1 text-blue-600">Risk: ' + Calc.money(t.total_risk || t.actual_risk) + '</div>';
       card.innerHTML = '<div class="font-bold flex justify-between"><span>' + t.instrument + '</span> <span class="text-xs text-gray-500 bg-gray-100 px-1 rounded">' + t.system + '</span></div><div class="mt-1 text-xs text-gray-500">' + dirLabel + ' \u2022 Qty: ' + t.final_qty + ' \u2022 ' + t.date + '</div>' + hedgeLabel + centerContent;
 
       // Drag events
@@ -579,7 +959,7 @@ const UI = {
 
       // Smart routing on click
       card.onclick = () => {
-        if (t.status === 'Closed') {
+        if (t.status === 'Closed' || t.status === 'Open') {
           $('.tab-btn[data-tab="pnl"]').click();
         } else {
           $('.tab-btn[data-tab="trades"]').click();
@@ -588,6 +968,11 @@ const UI = {
       };
 
       col.appendChild(card);
+    });
+
+    ['watchlist', 'open', 'wins', 'losses'].forEach(k => {
+      const badge = $('#badge-kanban-' + k);
+      if (badge && cols[k]) badge.textContent = cols[k].children.length;
     });
   },
 
@@ -617,12 +1002,15 @@ const UI = {
     };
 
     const sysSel = $('#pnl-filter-sys');
-    if (sysSel && sysSel.options.length <= 1) {
+    if (sysSel && sysSel.tagName === 'SELECT') {
+      const currentVal = sysSel.value;
+      sysSel.innerHTML = '<option value="">All Systems</option>';
       store.state.systems.forEach(s => {
         const opt = document.createElement('option');
         opt.value = s.name; opt.textContent = s.name;
         sysSel.appendChild(opt);
       });
+      sysSel.value = currentVal;
     }
 
     const filteredTrades = store.state.trades.filter(t => {
@@ -632,6 +1020,25 @@ const UI = {
       return true;
     });
 
+    const recalcOpenTotal = () => {
+      let sum = 0, hasOpen = false;
+      openT.querySelectorAll('.unreal').forEach(cell => {
+        const text = cell.textContent.replace(/[^0-9.-]+/g, "");
+        if (text && text !== '-' && cell.textContent.trim() !== '—') {
+          sum += Number(text);
+          hasOpen = true;
+        }
+      });
+      const totCell = $('#pnl-total-unrealized');
+      if (totCell) {
+        if (!hasOpen) { totCell.textContent = '—'; totCell.className = 'font-bold p-2 text-gray-500'; }
+        else {
+          totCell.textContent = Calc.money(sum);
+          totCell.className = 'font-bold p-2 ' + (sum >= 0 ? 'text-green-600' : 'text-red-600');
+        }
+      }
+    };
+
     filteredTrades.forEach(t => {
       if (t.status === 'Open') {
         const tr = document.createElement('tr');
@@ -639,14 +1046,16 @@ const UI = {
         const dirBadge = t.direction === 'Short' ? '<span class="text-xs font-bold text-red-500">SHORT</span>' : '<span class="text-xs font-bold text-green-600">LONG</span>';
 
         tr.innerHTML = '<td class="p-2">' + t.date + '</td>' +
-        '<td>' + t.instrument + (t.strike ? ' ' + t.strike + ' ' + t.optionType : '') + ' ' + linkBtn + '</td>' +
-        '<td>' + dirBadge + '</td>' +
-        '<td>' + t.entry + '</td><td class="qty-cell">' + t.final_qty + '</td>' +
-        '<td><input data-id="' + t.id + '" class="mark-input border p-1 rounded text-sm w-20" value="' + (t.mark_price || '') + '"></td>' +
-        '<td class="unreal text-gray-400 font-semibold">\u2014</td>' +
-        '<td class="risk-bar-cell w-32">\u2014</td>' +
-        '<td><button data-id="' + t.id + '" class="close-btn px-2 py-1 rounded text-sm bg-indigo-600 text-white hover:bg-indigo-700">Close</button></td>';
-        
+          '<td>' + t.instrument + (t.strike ? ' ' + t.strike + ' ' + t.optionType : '') + ' ' + linkBtn +
+          (t.hedge ? ' <span class="ml-1 text-xs bg-blue-100 text-blue-700 px-1 rounded text-nowrap">🛡️ ' + t.hedge.strike + ' ' + t.hedge.type + '</span>' : '') + '</td>' +
+          '<td>' + dirBadge + '</td>' +
+          '<td>' + t.entry + '</td><td class="qty-cell">' + t.final_qty + '</td>' +
+          '<td><div class="flex items-center gap-2"><input data-id="' + t.id + '" class="mark-input border p-1 rounded text-sm w-20" value="' + (t.mark_price || '') + '" placeholder="Main">' +
+          (t.hedge ? '<input data-id="' + t.id + '" class="mark-input-hedge border p-1 rounded text-sm w-20 border-blue-300 bg-blue-50" value="' + (t.hedge.mark_price || '') + '" title="Hedge: ' + t.hedge.strike + ' ' + t.hedge.type + '" placeholder="Hedge">' : '') + '</div></td>' +
+          '<td class="unreal text-gray-400 font-semibold">\u2014</td>' +
+          '<td class="risk-bar-cell w-32">\u2014</td>' +
+          '<td><button data-id="' + t.id + '" class="close-btn px-2 py-1 rounded text-sm bg-indigo-600 text-white hover:bg-indigo-700">Close</button></td>';
+
         openT.appendChild(tr);
 
         tr.querySelector('.jump-btn').addEventListener('click', () => {
@@ -654,56 +1063,86 @@ const UI = {
           setTimeout(() => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }, t.parent_id || t.id), 50);
         });
 
-        const updateLiveMath = (raw) => {
+        const updateLiveMath = () => {
+          const mainInput = tr.querySelector('.mark-input');
+          const hedgeInput = tr.querySelector('.mark-input-hedge');
+
+          const rawMain = mainInput.value;
+          const rawHedge = hedgeInput ? hedgeInput.value : '';
+
           const unrealCell = tr.querySelector('.unreal');
           const barCell = tr.querySelector('.risk-bar-cell');
-          if (raw.trim() === '') {
+
+          if (rawMain.trim() === '' && (!t.hedge || rawHedge.trim() === '')) {
             unrealCell.textContent = '\u2014'; unrealCell.className = 'unreal text-gray-400 font-semibold';
             barCell.innerHTML = '\u2014';
             return;
           }
-          const parsed = Number(raw || 0);
+          const parsedMain = Number(rawMain || 0);
+          const parsedHedge = Number(rawHedge || 0);
+
           const dir = (t.direction === 'Short') ? -1 : 1;
-          const pnl = dir * (parsed - Number(t.entry || 0)) * Number(t.final_qty || 0);
-          unrealCell.textContent = Calc.money(pnl);
+          const mainPnl = rawMain.trim() !== '' ? dir * (parsedMain - Number(t.entry || 0)) * Number(t.final_qty || 0) : 0;
+          const hedgePnl = (t.hedge && rawHedge.trim() !== '') ? (parsedHedge - Number(t.hedge.entry || 0)) * Number(t.hedge.qty || 0) : 0;
+          const pnl = mainPnl + hedgePnl;
+
+          unrealCell.innerHTML = `${Calc.money(pnl)}`;
           unrealCell.className = 'unreal font-semibold ' + (pnl >= 0 ? 'text-green-600' : 'text-red-600');
-          
+
           const riskAmt = Number(t.actual_risk) || 0.01;
           const pct = Math.min(100, (Math.abs(pnl) / riskAmt) * 100);
           const color = pnl >= 0 ? 'green' : 'red';
-          let mText = pnl >= 0 ? '+' + (pct/100).toFixed(1) + 'R' : '-' + (pct/100).toFixed(1) + 'R';
+          let mText = pnl >= 0 ? '+' + (pct / 100).toFixed(1) + 'R' : '-' + (pct / 100).toFixed(1) + 'R';
           if (pnl === 0) mText = '0R';
           barCell.innerHTML = '<div class="flex items-center gap-2"><div class="progress-bg w-16"><div class="progress-bar ' + color + '" style="width:' + pct + '%"></div></div><span class="text-xs text-gray-500">' + mText + '</span></div>';
+          recalcOpenTotal();
         };
 
-        if (t.mark_price) updateLiveMath(String(t.mark_price));
+        if (t.mark_price || (t.hedge && t.hedge.mark_price)) updateLiveMath();
 
         tr.querySelector('.mark-input').addEventListener('input', (e) => {
           const raw = e.target.value;
           t.mark_price = raw.trim() === '' ? null : Number(raw);
-          updateLiveMath(raw);
+          updateLiveMath();
           store.save();
         });
+
+        const hInput = tr.querySelector('.mark-input-hedge');
+        if (hInput) {
+          hInput.addEventListener('input', (e) => {
+            const raw = e.target.value;
+            t.hedge.mark_price = raw.trim() === '' ? null : Number(raw);
+            updateLiveMath();
+            store.save();
+          });
+        }
         tr.querySelector('.close-btn').addEventListener('click', () => UI.handleCloseTrade(t));
       }
     });
 
+    recalcOpenTotal();
     this.renderClosedTradesGrouped(closedT, filteredTrades.filter(x => x.status === 'Closed'));
   },
 
   handleCloseTrade(trade) {
     const modal = $('#modal-close');
     if (!modal) return;
-    
-    // Reset modal fields
-    $('#modal-close-price').value = trade.entry;
+
+    // Reset modal fields: Default to Mark Price if available, else Entry
+    $('#modal-close-price').value = trade.mark_price !== null ? trade.mark_price : trade.entry;
     $('#modal-close-date').value = Calc.nowDate();
-    
+
     // Set Qty slider
     const slider = $('#modal-close-qty-slider');
     const disp = $('#modal-close-qty-display');
     const maxdisp = $('#modal-close-qty-max');
     const maxQty = trade.final_qty;
+
+    const instObj = store.state.instruments.find(x => x.symbol === trade.instrument);
+    const lotSize = instObj ? Number(instObj.lot || 1) : 1;
+
+    slider.min = lotSize;
+    slider.step = lotSize;
     slider.max = maxQty;
     slider.value = maxQty;
     disp.textContent = maxQty;
@@ -716,6 +1155,18 @@ const UI = {
     // Update display on slide
     slider.oninput = () => disp.textContent = slider.value;
 
+    const hedgeGrp = $('#modal-hedge-close-group');
+    if (hedgeGrp) {
+      if (trade.hedge) {
+        hedgeGrp.classList.remove('hidden');
+        $('#modal-close-hedge-inst').textContent = trade.hedge.strike + ' ' + trade.hedge.type;
+        $('#modal-close-price-hedge').value = trade.hedge.mark_price !== null ? trade.hedge.mark_price : (trade.hedge.entry || '');
+      } else {
+        hedgeGrp.classList.add('hidden');
+        $('#modal-close-price-hedge').value = '';
+      }
+    }
+
     modal.classList.remove('hidden');
 
     // Close X button
@@ -723,9 +1174,9 @@ const UI = {
 
     // Submit handler
     const btnSubmit = $('#btn-modal-submit-close');
-    btnSubmit.onclick = () => {
+    btnSubmit.onclick = async () => {
       const closePrice = Number($('#modal-close-price').value);
-      if (isNaN(closePrice) || closePrice <= 0) return alert('Invalid close price');
+      if (isNaN(closePrice) || closePrice <= 0) return showToast('Invalid close price', 'error');
       let qtyClose = Number(slider.value);
 
       const instObj = store.state.instruments.find(x => x.symbol === trade.instrument);
@@ -733,20 +1184,35 @@ const UI = {
       const adjusted = Calc.enforceLotSize(qtyClose, lotSize, 'down');
 
       if (qtyClose !== adjusted && qtyClose < maxQty) {
-        if (!confirm(`Adjust qty ${qtyClose} to valid lot multiple ${adjusted}?`)) return;
+        if (!await showConfirm(`Adjust qty ${qtyClose} to valid lot multiple ${adjusted}?`)) return;
         qtyClose = adjusted;
       }
-      if (qtyClose <= 0 || qtyClose > maxQty) return alert('Invalid qty');
+      if (qtyClose <= 0 || qtyClose > maxQty) return showToast('Invalid qty', 'error');
 
       const dir = (trade.direction === 'Short') ? -1 : 1;
-      const realized = dir * (closePrice - trade.entry) * qtyClose;
+      const mainRealized = dir * (closePrice - trade.entry) * qtyClose;
+
+      let hedgeRealized = 0;
+      let closePriceHedge = null;
+      let hedgeQtyClose = 0;
+
+      if (trade.hedge) {
+        closePriceHedge = Number($('#modal-close-price-hedge').value);
+        if (isNaN(closePriceHedge) || closePriceHedge <= 0) return showToast('Invalid hedge close price', 'error');
+        hedgeQtyClose = Math.round(trade.hedge.qty * (qtyClose / maxQty));
+        hedgeRealized = (closePriceHedge - trade.hedge.entry) * hedgeQtyClose;
+      }
+
+      const realized = mainRealized + hedgeRealized;
       const cDate = $('#modal-close-date').value || Calc.nowDate();
 
       if (qtyClose < maxQty) {
         // PARTIAL CLOSE
         trade.final_qty -= qtyClose;
         trade.qty_rounded = trade.final_qty;
-        trade.actual_risk = trade.final_qty * Math.abs(trade.entry - trade.exit);
+
+        const remainPct = trade.final_qty / (trade.final_qty + qtyClose);
+        trade.actual_risk = trade.actual_risk * remainPct;
 
         const siblings = store.state.trades.filter(x => x.parent_id === trade.id);
         const childId = trade.id + '.' + (siblings.length + 1);
@@ -754,11 +1220,17 @@ const UI = {
         const closedObj = {
           ...trade, id: childId, parent_id: trade.id,
           final_qty: qtyClose, qty_rounded: qtyClose,
-          actual_risk: Math.abs(trade.entry - trade.exit) * qtyClose,
+          actual_risk: trade.actual_risk / remainPct * (1 - remainPct),
           status: 'Closed', close_price: closePrice, close_date: cDate,
           realized_pnl: realized, notes: (trade.notes || '') + ' (partial close)',
           mark_price: null
         };
+
+        if (trade.hedge) {
+          trade.hedge.qty -= hedgeQtyClose;
+          closedObj.hedge = { ...trade.hedge, qty: hedgeQtyClose, close_price: closePriceHedge, mark_price: null };
+        }
+
         store.addTrade(closedObj);
       } else {
         // FULL CLOSE
@@ -767,23 +1239,74 @@ const UI = {
         trade.close_date = cDate;
         trade.realized_pnl = realized;
         trade.mark_price = null;
+        if (trade.hedge) {
+          trade.hedge.close_price = closePriceHedge;
+          trade.hedge.mark_price = null;
+        }
         store.save();
       }
-      
+
       modal.classList.add('hidden');
       UI.renderPNL();
       UI.renderKanban();
+      UI.renderDashboard();
+    };
+  },
+
+  handleEditClosePrice(trade) {
+    const modal = $('#modal-edit-close');
+    if (!modal) return;
+
+    $('#modal-edit-close-price').value = trade.close_price;
+    const hedgeGrp = $('#modal-edit-hedge-close-group');
+    if (hedgeGrp) {
+      if (trade.hedge) {
+        hedgeGrp.classList.remove('hidden');
+        $('#modal-edit-close-price-hedge').value = trade.hedge.close_price || '';
+      } else {
+        hedgeGrp.classList.add('hidden');
+        $('#modal-edit-close-price-hedge').value = '';
+      }
+    }
+
+    modal.classList.remove('hidden');
+
+    $('#btn-modal-edit-close-x').onclick = () => modal.classList.add('hidden');
+
+    const btnSubmit = $('#btn-modal-submit-edit-close');
+    btnSubmit.onclick = () => {
+      const cp = Number($('#modal-edit-close-price').value);
+      if (isNaN(cp) || cp <= 0) return showToast('Invalid close price', 'error');
+
+      let hp = null;
+      if (trade.hedge) {
+        hp = Number($('#modal-edit-close-price-hedge').value);
+        if (isNaN(hp) || hp <= 0) return showToast('Invalid hedge close price', 'error');
+      }
+
+      trade.close_price = cp;
+      if (trade.hedge) trade.hedge.close_price = hp;
+
+      const dir = (trade.direction === 'Short') ? -1 : 1;
+      const mainRealized = dir * (cp - trade.entry) * trade.final_qty;
+      let hedgeRealized = 0;
+      if (trade.hedge) {
+        hedgeRealized = (hp - trade.hedge.entry) * trade.hedge.qty;
+      }
+      trade.realized_pnl = mainRealized + hedgeRealized;
+
+      store.save();
+      modal.classList.add('hidden');
+      showToast('Exit price updated successfully', 'success');
+
+      UI.renderPNL();
+      UI.renderKanban();
+      UI.renderDashboard();
     };
   },
 
   renderClosedTradesGrouped(container, closedTradesOverride = null) {
     const closed = closedTradesOverride || store.state.trades.filter(x => x.status === 'Closed');
-    closed.forEach(c => {
-      if (!c.parent_id) {
-        const parent = store.state.trades.find(t => t.id !== c.id && t.instrument === c.instrument && t.entry === c.entry && t.system === c.system);
-        if (parent) c.parent_id = parent.id;
-      }
-    });
     const groups = {};
     closed.forEach(c => {
       const key = c.parent_id || c.id;
@@ -799,7 +1322,7 @@ const UI = {
       const totalRealized = items.reduce((s, i) => s + i.realized_pnl, 0);
       const totalRisk = items.reduce((s, i) => s + (i.actual_risk || 0.01), 0);
       const weightedExit = totalQty ? (items.reduce((s, i) => s + (i.close_price * i.final_qty), 0) / totalQty) : 0;
-      
+
       const tr = document.createElement('tr');
       tr.classList.add('bg-white', 'border-b', 'hover:bg-gray-50');
       const expandId = 'grp-' + key.replace(/[^a-zA-Z0-9]/g, '');
@@ -808,10 +1331,10 @@ const UI = {
       // Progress bar for parent
       const pct = Math.min(100, (Math.abs(totalRealized) / (parent.actual_risk || totalRisk || 0.01)) * 100);
       const color = totalRealized >= 0 ? 'green' : 'red';
-      const mText = totalRealized >= 0 ? `+${(pct/100).toFixed(1)}R` : `-${(pct/100).toFixed(1)}R`;
+      const mText = totalRealized >= 0 ? `+${(pct / 100).toFixed(1)}R` : `-${(pct / 100).toFixed(1)}R`;
       const pBar = `<div class="flex items-center gap-2"><div class="progress-bg w-16"><div class="progress-bar ${color}" style="width:${pct}%"></div></div><span class="text-xs text-gray-500">${mText}</span></div>`;
 
-      tr.innerHTML = `<td class="p-2">${items.length > 1 ? `<button data-target="${expandId}" class="toggle-grp text-xs text-gray-500 hover:text-gray-900 mr-1 transition-transform">\u25b6</button>` : '<span class="w-3 mr-1 inline-block"></span>'} ${items[items.length - 1].close_date}</td><td>${parent.instrument}</td><td>${dirBadge}</td><td>${parent.entry}</td><td>${weightedExit.toFixed(2)}</td><td>${totalQty}</td><td class="${totalRealized >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold">${Calc.money(totalRealized)}</td><td>${pBar}</td><td><button class="jump-btn ml-2 text-xs text-blue-500 hover:text-blue-700" title="View in Trades">\u2197</button></td>`;
+      tr.innerHTML = `<td class="p-2">${items.length > 1 ? `<button data-target="${expandId}" class="toggle-grp text-xs text-gray-500 hover:text-gray-900 mr-1 transition-transform">\u25b6</button>` : '<span class="w-3 mr-1 inline-block"></span>'} ${items[items.length - 1].close_date}</td><td>${parent.instrument}</td><td>${dirBadge}</td><td>${parent.entry}</td><td>${weightedExit.toFixed(2)}${items.length === 1 ? ` <button class="btn-edit-close ml-2 text-xs text-orange-500 hover:text-orange-700" data-id="${parent.id}" title="Edit Exit Price">\u270f\ufe0f</button>` : ''}</td><td>${totalQty}</td><td class="${totalRealized >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold">${Calc.money(totalRealized)}</td><td>${pBar}</td><td><button class="jump-btn ml-2 text-xs text-blue-500 hover:text-blue-700" title="View in Trades">\u2197</button></td>`;
       container.appendChild(tr);
 
       tr.querySelector('.jump-btn').addEventListener('click', () => {
@@ -826,10 +1349,10 @@ const UI = {
 
           const sPct = Math.min(100, (Math.abs(it.realized_pnl) / (it.actual_risk || 0.01)) * 100);
           const sColor = it.realized_pnl >= 0 ? 'green' : 'red';
-          const sText = it.realized_pnl >= 0 ? `+${(sPct/100).toFixed(1)}R` : `-${(sPct/100).toFixed(1)}R`;
+          const sText = it.realized_pnl >= 0 ? `+${(sPct / 100).toFixed(1)}R` : `-${(sPct / 100).toFixed(1)}R`;
           const sBar = `<div class="flex items-center gap-2"><div class="progress-bg w-10"><div class="progress-bar ${sColor}" style="width:${sPct}%"></div></div><span class="text-xs text-gray-400">${sText}</span></div>`;
 
-          sub.innerHTML = `<td class="pl-8">Part: ${it.close_date}</td><td></td><td></td><td>\u2014</td><td>${it.close_price}</td><td>${it.final_qty}</td><td class="${it.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(it.realized_pnl)}</td><td>${sBar}</td><td></td>`;
+          sub.innerHTML = `<td class="pl-8">Part: ${it.close_date}</td><td></td><td></td><td>\u2014</td><td>${it.close_price} <button class="btn-edit-close ml-2 text-xs text-orange-500 hover:text-orange-700" data-id="${it.id}" title="Edit Exit Price">\u270f\ufe0f</button></td><td>${it.final_qty}</td><td class="${it.realized_pnl >= 0 ? 'text-green-600' : 'text-red-600'}">${Calc.money(it.realized_pnl)}</td><td>${sBar}</td><td></td>`;
           container.appendChild(sub);
         });
       }
@@ -843,6 +1366,14 @@ const UI = {
         btn.textContent = btn.textContent === '\u25b6' ? '\u25bc' : '\u25b6';
       });
     });
+
+    container.querySelectorAll('.btn-edit-close').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const t = store.state.trades.find(x => x.id === btn.dataset.id);
+        if (t) UI.handleEditClosePrice(t);
+      });
+    });
   },
 
   renderAnalytics() {
@@ -854,7 +1385,7 @@ const UI = {
     const draw = Calc.estimateMaxDrawdown(trades);
 
     if ($('#analytic-win')) $('#analytic-win').textContent = win === null ? '—' : win.toFixed(1) + '%';
-    if ($('#analytic-pf')) $('#analytic-pf').textContent = pf === null ? '—' : pf.toFixed(2);
+    if ($('#analytic-pf')) $('#analytic-pf').textContent = formatPF(pf);
     if ($('#analytic-rmul')) $('#analytic-rmul').textContent = rm === null ? '—' : rm.toFixed(2);
     if ($('#analytic-avgp')) $('#analytic-avgp').textContent = avg === null ? '—' : Calc.money(avg);
     if ($('#analytic-draw')) $('#analytic-draw').textContent = draw === null ? '—' : (draw.toFixed(1) + '%');
@@ -862,8 +1393,18 @@ const UI = {
 
     const pts = []; let cum = 0;
     const sorted = [...trades].sort((a, b) => new Date(a.date) - new Date(b.date));
-    const labels = sorted.map(t => t.date);
-    sorted.forEach(t => { const pnl = (t.status === 'Closed') ? Number(t.realized_pnl || 0) : ((Number(t.mark_price || 0) - Number(t.entry || 0)) * Number(t.final_qty || 0)); cum += pnl; pts.push(cum / 100000); });
+    const labels = sorted.map((t, i) => 'T' + (i + 1) + ' (' + t.date + ')');
+    sorted.forEach(t => {
+      const dir = (t.direction === 'Short') ? -1 : 1;
+      let pnl = 0;
+      if (t.status === 'Closed') {
+        pnl = Number(t.realized_pnl || 0);
+      } else if (t.mark_price != null) {
+        pnl = dir * (Number(t.mark_price) - Number(t.entry || 0)) * Number(t.final_qty || 0);
+      }
+      cum += pnl;
+      pts.push(cum / 100000);
+    });
     if (pts.length === 0) pts.push(0);
     Charts.renderDetailedEquityChart('equityChart2', pts, labels);
     this.renderTagAnalytics(trades);
@@ -1022,7 +1563,7 @@ const Sync = {
       await this.writeSheet(sid, 'Trades!A1', dataTrades);
 
       this.log('Export Complete!');
-      alert('Synced to Sheet!');
+      showToast('Synced to Google Sheet ✓', 'success');
     } catch (e) {
       this.log('Export Failed: ' + e.message);
       console.error(e);
@@ -1046,7 +1587,7 @@ const Sync = {
   // --- IMPORT ---
   async pullFromSheet() {
     if (!this.config.sheetId) return;
-    if (!confirm('This will OVERWRITE all local data. Continue?')) return;
+    if (!await showConfirm('This will OVERWRITE all local data with Sheet data. Continue?')) return;
 
     this.log('Starting Import...');
     try {
@@ -1081,7 +1622,7 @@ const Sync = {
       store.replaceState({ systems: newSystems, instruments: newInstruments, trades: newTrades });
       renderAll();
       this.log('Import Complete.');
-      alert('Data Imported!');
+      showToast('Data imported from Sheet ✓', 'success');
 
     } catch (e) {
       this.log('Import Failed: ' + e.message);
@@ -1095,8 +1636,81 @@ const Sync = {
 // ==========================================
 let editingTradeId = null;
 
-function init() {
-  store.load();
+function showToast(message, type = 'info', duration = 3500) {
+  const container = document.getElementById('toast-container');
+  if (!container) { console.warn(message); return; }
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity 0.3s';
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-confirm');
+    document.getElementById('modal-confirm-msg').textContent = message;
+    modal.classList.remove('hidden');
+    const cleanup = (result) => {
+      modal.classList.add('hidden');
+      resolve(result);
+    };
+    document.getElementById('modal-confirm-ok').onclick = () => cleanup(true);
+    document.getElementById('modal-confirm-cancel').onclick = () => cleanup(false);
+  });
+}
+
+function validateTradeForm() {
+  let valid = true;
+  const fields = [
+    { id: 'nt-system', check: v => v !== '', msg: 'Select a system' },
+    { id: 'nt-instrument', check: v => v.trim() !== '', msg: 'Enter instrument symbol' },
+    { id: 'nt-entry', check: v => Number(v) > 0, msg: 'Entry price must be > 0' },
+    { id: 'nt-exit', check: v => Number(v) > 0, msg: 'Exit/SL must be > 0' },
+    { id: 'nt-lot', check: v => Number(v) > 0, msg: 'Lot size must be > 0' },
+  ];
+  // Clear previous errors
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (!el) return;
+    el.classList.remove('field-error');
+    const prev = el.parentElement.querySelector('.field-error-msg');
+    if (prev) prev.remove();
+  });
+  // Validate
+  fields.forEach(f => {
+    const el = document.getElementById(f.id);
+    if (!el) return;
+    if (!f.check(el.value)) {
+      el.classList.add('field-error');
+      const msg = document.createElement('span');
+      msg.className = 'field-error-msg';
+      msg.textContent = f.msg;
+      el.parentElement.appendChild(msg);
+      valid = false;
+    }
+  });
+  // Entry ≠ Exit check
+  const entry = Number(document.getElementById('nt-entry').value);
+  const exit = Number(document.getElementById('nt-exit').value);
+  if (entry > 0 && exit > 0 && entry === exit) {
+    const el = document.getElementById('nt-exit');
+    el.classList.add('field-error');
+    const msg = document.createElement('span');
+    msg.className = 'field-error-msg';
+    msg.textContent = 'Entry and Exit/SL cannot be equal';
+    el.parentElement.appendChild(msg);
+    valid = false;
+  }
+  return valid;
+}
+
+async function init() {
+  await store.load();
   Sync.init(); // Init Sync
   renderAll();
   setupTabs();
@@ -1136,6 +1750,7 @@ function setupTabs() {
       if (tab === 'kanban') UI.renderKanban();
       if (tab === 'analytics') UI.renderAnalytics();
       if (tab === 'pnl') UI.renderPNL();
+      if (tab === 'admin') fetchAdminUsers();
       // cloud tab needs no render logic
     });
   });
@@ -1159,43 +1774,143 @@ function setupNewTradeForm() {
     sel.appendChild(o);
   });
   if (currentVal) sel.value = currentVal;
-  const dl = $('#inst-list');
-  if (dl) {
-    dl.innerHTML = '';
-    store.state.instruments.forEach(i => {
-      const o = document.createElement('option');
-      o.value = i.symbol;
-      dl.appendChild(o);
-    });
-  }
+  // Custom search results will populate dynamically on input
   if ($('#nt-date') && !$('#nt-date').value) $('#nt-date').value = Calc.nowDate();
-  const ids = ['nt-system', 'nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags', 'nt-round-mode', 'hedge-premium', 'hedge-qty'];
+  const ids = ['nt-system', 'nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags', 'nt-round-mode', 'hedge-premium', 'hedge-qty', 'hedge-instrument', 'hedge-strike'];
   ids.forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.oninput = updateTradeCalc;
+    if (el) {
+      el.oninput = (e) => {
+        el.classList.remove('field-error');
+        if (e.target.id.startsWith('hedge-')) { delete e.target.dataset.autofilled; }
+        const prev = el.parentElement.querySelector('.field-error-msg');
+        if (prev) prev.remove();
+        updateTradeCalc();
+      };
+    }
   });
   if ($('#prefill-lot')) $('#prefill-lot').onclick = () => {
-    const sym = $('#nt-instrument').value.trim();
-    const it = store.state.instruments.find(x => x.symbol === sym);
+    const sym = $('#nt-instrument').value.trim().toUpperCase();
+    const it = getInstrumentMaster().find(x => x.symbol.toUpperCase() === sym);
     if (it) { $('#nt-lot').value = it.lot; updateTradeCalc(); }
-    else alert('Instrument not found');
+    else showToast('Instrument not found in master list', 'warning');
   };
   const instInput = $('#nt-instrument');
-  if (instInput) {
-    instInput.oninput = () => {
-      const sym = instInput.value.trim();
-      const it = store.state.instruments.find(x => x.symbol === sym);
-      if (it && it.type === 'Options') {
-        $('#option-fields').classList.remove('hidden');
-        $('#option-type-field').classList.remove('hidden');
+  const instResults = $('#inst-results');
+  if (instInput && instResults) {
+    instInput.addEventListener('input', () => {
+      const val = instInput.value.trim().toUpperCase();
+      instResults.innerHTML = '';
+      if (val.length < 1) {
+        instResults.classList.add('hidden');
+        return;
+      }
+      // Re-trigger the calc and error hiding
+      instInput.classList.remove('field-error');
+      const prevErr = instInput.parentElement.querySelector('.field-error-msg');
+      if (prevErr) prevErr.remove();
+
+      const matches = getInstrumentMaster().filter(i => i.symbol.toUpperCase().includes(val)).slice(0, 10);
+      if (matches.length > 0) {
+        matches.forEach(m => {
+          const div = document.createElement('div');
+          div.className = 'p-2 hover:bg-blue-50 cursor-pointer border-b text-sm last:border-0';
+          div.innerHTML = `<span class="font-bold">${m.symbol}</span> <span class="text-xs text-gray-500">(Lot: ${m.lot}, ${m.type})</span>`;
+          div.onclick = (e) => {
+            e.stopPropagation();
+            instInput.value = m.symbol;
+            instResults.classList.add('hidden');
+            // Trigger change logic
+            const event = new Event('change');
+            instInput.dispatchEvent(event);
+          };
+          instResults.appendChild(div);
+        });
+        instResults.classList.remove('hidden');
       } else {
+        instResults.classList.add('hidden');
+      }
+      updateTradeCalc();
+    });
+
+    // Close results when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!instInput.contains(e.target) && !instResults.contains(e.target)) {
+        instResults.classList.add('hidden');
+      }
+    });
+
+    instInput.addEventListener('change', () => {
+      const sym = instInput.value.trim().toUpperCase();
+      const it = getInstrumentMaster().find(x => x.symbol.toUpperCase() === sym);
+      if (it) {
+        $('#nt-lot').value = it.lot;
+        if (it.type === 'Options') {
+          $('#option-fields').classList.remove('hidden');
+          $('#option-type-field').classList.remove('hidden');
+        } else {
+          $('#option-fields').classList.add('hidden');
+          $('#option-type-field').classList.add('hidden');
+        }
+      } else {
+        $('#nt-lot').value = '';
         $('#option-fields').classList.add('hidden');
         $('#option-type-field').classList.add('hidden');
       }
-      if (it) $('#nt-lot').value = it.lot;
       updateTradeCalc();
-    }
+    });
   }
+
+  // Sizing mode toggle
+  const sizingToggle = $('#nt-sizing-mode');
+  const sizingLabel = $('#nt-sizing-label');
+  const numLotsGroup = $('#nt-num-lots-group');
+  const roundModeEl = $('#nt-round-mode');
+
+  function applySizingMode() {
+    const isRisk = sizingToggle && sizingToggle.checked;
+    if (sizingLabel) sizingLabel.textContent = isRisk ? 'Risk Mode (R determines qty)' : 'Lot Mode (1 lot default)';
+    if (numLotsGroup) numLotsGroup.style.display = isRisk ? 'none' : '';
+    if (roundModeEl) roundModeEl.closest('div').style.display = isRisk ? '' : 'none';
+    updateTradeCalc();
+  }
+  if (sizingToggle) {
+    sizingToggle.addEventListener('change', applySizingMode);
+    applySizingMode(); // Apply on init
+  }
+
+  // Num lots input
+  const numLotsInput = $('#nt-num-lots');
+  if (numLotsInput) {
+    numLotsInput.oninput = () => updateTradeCalc();
+  }
+
+  const toggleHedgeBtn = $('#toggle-hedge');
+  const hedgeFieldsContainer = $('#hedge-fields');
+  if (toggleHedgeBtn && hedgeFieldsContainer) {
+    toggleHedgeBtn.onclick = () => {
+      const isHidden = hedgeFieldsContainer.classList.toggle('hidden');
+      toggleHedgeBtn.querySelector('.chevron').classList.toggle('rotate-90');
+
+      const hInst = $('#hedge-instrument');
+      const hStrike = $('#hedge-strike');
+      const hQty = $('#hedge-qty');
+
+      if (!isHidden) {
+        if (hInst && !hInst.value && instInput) { hInst.value = instInput.value; hInst.dataset.autofilled = 'true'; }
+        if (hStrike && !hStrike.value && $('#nt-exit')) { hStrike.value = $('#nt-exit').value; hStrike.dataset.autofilled = 'true'; }
+        const currentQtyText = $('#calc-finalqty') ? $('#calc-finalqty').textContent.trim() : '';
+        if (hQty && !hQty.value && currentQtyText !== '—') { hQty.value = currentQtyText; hQty.dataset.autofilled = 'true'; }
+      } else {
+        if (hInst) { hInst.value = ''; delete hInst.dataset.autofilled; }
+        if (hStrike) { hStrike.value = ''; delete hStrike.dataset.autofilled; }
+        if (hQty) { hQty.value = ''; delete hQty.dataset.autofilled; }
+        if ($('#hedge-premium')) $('#hedge-premium').value = '';
+      }
+      updateTradeCalc();
+    };
+  }
+
   $('#save-trade').onclick = saveTrade;
   $('#reset-trade').onclick = resetForm;
 }
@@ -1208,19 +1923,48 @@ function updateTradeCalc() {
   const entry = Number($('#nt-entry').value || 0);
   const exit = Number($('#nt-exit').value || 0);
   const lot = Number($('#nt-lot').value || 0);
-  const mode = $('#nt-round-mode') ? $('#nt-round-mode').value : 'down';
+  const roundMode = $('#nt-round-mode') ? $('#nt-round-mode').value : 'down';
 
-  const { riskPerShare, qty } = Calc.calculateRiskQty(R, entry, exit);
-  $('#calc-riskqty').textContent = riskPerShare || '—';
-  $('#calc-qtyrisk').textContent = qty || '—';
-  let qtyrounded = '—';
+  const isRiskMode = $('#nt-sizing-mode') && $('#nt-sizing-mode').checked;
+  const riskPerShare = Math.abs(entry - exit);
+
   let finalqty = '—';
-  if (qty > 0 && lot > 0) {
-    qtyrounded = Calc.enforceLotSize(qty, lot, mode);
-    finalqty = qtyrounded;
+  let qtyrounded = '—';
+  let qty = 0;
+
+  if (isRiskMode) {
+    // RISK MODE: R determines qty
+    const calc = Calc.calculateRiskQty(R, entry, exit);
+    qty = calc.qty;
+    $('#calc-riskqty').textContent = calc.riskPerShare || '—';
+    $('#calc-qtyrisk').textContent = qty || '—';
+    if (qty > 0 && lot > 0) {
+      qtyrounded = Calc.enforceLotSize(qty, lot, roundMode);
+      finalqty = qtyrounded;
+    }
+  } else {
+    // LOT MODE: lots × lotSize = qty
+    const numLots = Number($('#nt-num-lots') ? $('#nt-num-lots').value || 1 : 1);
+    qty = numLots * lot;
+    finalqty = qty > 0 ? qty : '—';
+    qtyrounded = finalqty;
+    $('#calc-riskqty').textContent = riskPerShare || '—';
+    $('#calc-qtyrisk').textContent = qty || '—';
   }
+
   $('#calc-qtyrounded').textContent = qtyrounded;
   $('#calc-finalqty').textContent = finalqty;
+
+  const hedgeFieldsContainer = $('#hedge-fields');
+  if (hedgeFieldsContainer && !hedgeFieldsContainer.classList.contains('hidden')) {
+    const hInst = $('#hedge-instrument');
+    const hStrike = $('#hedge-strike');
+    const hQty = $('#hedge-qty');
+
+    if (hInst && hInst.dataset.autofilled === 'true') hInst.value = $('#nt-instrument').value;
+    if (hStrike && hStrike.dataset.autofilled === 'true') hStrike.value = $('#nt-exit').value;
+    if (hQty && hQty.dataset.autofilled === 'true') hQty.value = finalqty !== '—' ? finalqty : '';
+  }
   const actualRisk = (finalqty !== '—' && riskPerShare) ? (finalqty * riskPerShare) : '—';
   $('#calc-actual').textContent = actualRisk === '—' ? '—' : Calc.money(actualRisk);
   const totalBuy = (finalqty !== '—' && entry) ? (finalqty * entry) : '—';
@@ -1238,26 +1982,57 @@ function updateTradeCalc() {
   if ($('#calc-total-risk')) $('#calc-total-risk').textContent = totalRisk > 0 ? Calc.money(totalRisk) : '—';
 }
 
-function saveTrade() {
+async function saveTrade() {
+  if (!validateTradeForm()) return;
   const sysName = $('#nt-system').value;
-  if (!sysName) return alert('Select System');
+  if (!sysName) return showToast('Select a system', 'warning');
   const inst = $('#nt-instrument').value.trim();
   const entry = Number($('#nt-entry').value);
   const exit = Number($('#nt-exit').value);
   const lot = Number($('#nt-lot').value || 1);
-  const mode = $('#nt-round-mode') ? $('#nt-round-mode').value : 'down';
+  const roundMode = $('#nt-round-mode') ? $('#nt-round-mode').value : 'down';
+  const isRiskMode = $('#nt-sizing-mode') && $('#nt-sizing-mode').checked;
 
   const sys = store.state.systems.find(s => s.name === sysName);
   const R = sys ? Number(sys.R) : 0;
-  const { riskPerShare, qty } = Calc.calculateRiskQty(R, entry, exit);
+  const riskPerShare = Math.abs(entry - exit);
   let final_qty = 0;
+  let qty = 0;
 
-  if (qty > 0 && lot > 0) {
-    final_qty = Calc.enforceLotSize(qty, lot, mode);
+  if (isRiskMode) {
+    // RISK MODE
+    const calc = Calc.calculateRiskQty(R, entry, exit);
+    qty = calc.qty;
+    if (qty > 0 && lot > 0) {
+      final_qty = Calc.enforceLotSize(qty, lot, roundMode);
+      if (final_qty === 0) {
+        showToast(
+          `Position size is 0 lots at current R (₹${R.toLocaleString()}). ` +
+          `Your R must be ≥ ₹${(riskPerShare * lot).toLocaleString()} for 1 lot. ` +
+          `Try Round Up mode or increase R.`,
+          'error'
+        );
+        return;
+      }
+    } else {
+      showToast('Entry and Exit/SL cannot be the same price.', 'error');
+      return;
+    }
   } else {
-    if (!confirm('Risk qty 0. Use lot?')) return;
-    final_qty = lot;
+    // LOT MODE
+    const numLots = Number($('#nt-num-lots') ? $('#nt-num-lots').value || 1 : 1);
+    if (!riskPerShare) {
+      showToast('Entry and Exit/SL cannot be the same price.', 'error');
+      return;
+    }
+    final_qty = numLots * lot;
+    qty = final_qty; // In Lot Mode, qty and final_qty are the same
+    if (final_qty <= 0) {
+      showToast('Invalid lot size or number of lots.', 'error');
+      return;
+    }
   }
+
   const actual_risk = final_qty * riskPerShare;
   const leverage = R ? (actual_risk / R) : 1;
 
@@ -1302,6 +2077,7 @@ function saveTrade() {
   const tradeObj = {
     id: newId,
     date: $('#nt-date').value || Calc.nowDate(),
+    R_at_entry: R,
     system: sysName,
     instrument: inst,
     direction,
@@ -1317,11 +2093,11 @@ function saveTrade() {
   if (editingTradeId) store.updateTrade(tradeObj);
   else store.addTrade(tradeObj);
   if (!store.state.instruments.find(x => x.symbol === inst)) {
-    if (confirm('Add new instrument to master?')) {
+    if (await showConfirm('Add new instrument to master?')) {
       store.addInstrument({ symbol: inst, lot, type: tradeObj.optionType ? 'Options' : 'Futures' });
     }
   }
-  alert('Saved');
+  showToast('Trade saved ✓', 'success');
   resetForm();
   editingTradeId = null;
   UI.renderDashboard();
@@ -1330,10 +2106,10 @@ function saveTrade() {
 function resetForm() {
   editingTradeId = null;
   ['nt-entry', 'nt-exit', 'nt-instrument', 'nt-lot', 'nt-strike', 'nt-optiontype', 'nt-tags',
-   'hedge-instrument', 'hedge-strike', 'hedge-premium', 'hedge-qty'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
-  });
+    'hedge-instrument', 'hedge-strike', 'hedge-premium', 'hedge-qty'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
   $('#nt-system').value = '';
   if ($('#nt-direction')) $('#nt-direction').value = 'Long';
   setDirection('Long');
@@ -1342,6 +2118,44 @@ function resetForm() {
 }
 
 function setupGlobalListeners() {
+  // Configurable Mobile Sidebar Drawer
+  const sidebar = $('#sidebar');
+  const overlay = $('#mobile-overlay');
+  const toggleBtn = $('#toggle-sidebar');
+  const toggleMenu = () => {
+    if (sidebar) sidebar.classList.toggle('open');
+    if (overlay) overlay.classList.toggle('open');
+  };
+  if (toggleBtn) toggleBtn.onclick = toggleMenu;
+  if (overlay) overlay.onclick = toggleMenu;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (window.innerWidth <= 900) {
+        if (sidebar) sidebar.classList.remove('open');
+        if (overlay) overlay.classList.remove('open');
+      }
+    });
+  });
+
+  // Kanban Filter Action
+  const kbFilt = $('#kanban-filter-period');
+  if (kbFilt) kbFilt.onchange = () => UI.renderKanban();
+
+  const exportBtn = $('#btn-export-pdf');
+  if (exportBtn) {
+    exportBtn.onclick = () => {
+      showToast('Preparing PDF Export...', 'info', 2000);
+      const el = document.querySelector('main');
+      const opt = {
+        margin: 10, filename: 'Risk_Engine_Report.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+      };
+      html2pdf().set(opt).from(el).save();
+    };
+  }
+
   const themeBtn = $('#theme-toggle');
   if (themeBtn) themeBtn.onclick = () => {
     document.documentElement.classList.toggle('dark');
@@ -1362,13 +2176,13 @@ function setupGlobalListeners() {
         const obj = JSON.parse(ev.target.result);
         store.replaceState(obj);
         renderAll();
-        alert('Restored');
-      } catch (e) { alert('Invalid File'); }
+        showToast('Backup restored ✓', 'success');
+      } catch (e) { showToast('Invalid backup file', 'error'); }
     };
     r.readAsText(f);
   };
-  if ($('#btn-clear')) $('#btn-clear').onclick = () => {
-    if (confirm('Delete All Data?')) {
+  if ($('#btn-clear')) $('#btn-clear').onclick = async () => {
+    if (await showConfirm('Delete ALL local data? This cannot be undone.')) {
       store.replaceState({ systems: [], instruments: [], trades: [] });
       renderAll();
     }
@@ -1376,13 +2190,124 @@ function setupGlobalListeners() {
 
   // FIX: Missing Listeners for Adding
   if ($('#add-system')) $('#add-system').onclick = () => {
-    store.addSystem({ name: 'System ' + (store.state.systems.length + 1), capital: 100000, R: 1000 });
+    store.addSystem({ name: 'System ' + (store.state.systems.length + 1), capital: 100000, R: 1000, daily_loss_limit: 20000 });
     UI.renderSystems();
   };
   if ($('#add-instrument')) $('#add-instrument').onclick = () => {
     store.addInstrument({ symbol: 'New_Inst', lot: 1, type: 'Futures' });
     UI.renderInstruments();
   };
+
+  // F&O Master Excel Upload handler
+  const foUpload = document.getElementById('upload-fo-master');
+  if (foUpload) {
+    foUpload.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const wb = XLSX.read(evt.target.result, { type: 'binary' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+          if (!rows.length) return showToast('Empty spreadsheet', 'error');
+
+          // Try to detect columns (flexible naming)
+          const firstRow = rows[0];
+          const keys = Object.keys(firstRow);
+          const symKey = keys.find(k => /symbol|instrument|stock|name|underlying/i.test(k)) || keys[0];
+          const lotKey = keys.find(k => /lot|market.?lot|qty/i.test(k)) || keys[1];
+          const typeKey = keys.find(k => /type|segment|inst.?type/i.test(k));
+
+          const parsed = rows
+            .filter(r => r[symKey] && String(r[symKey]).trim())
+            .map(r => ({
+              symbol: String(r[symKey]).trim().toUpperCase(),
+              lot: Number(r[lotKey]) || 1,
+              type: typeKey && r[typeKey] ? String(r[typeKey]).trim() : 'Futures'
+            }));
+
+          if (!parsed.length) return showToast('Could not parse any instruments', 'error');
+
+          localStorage.setItem('nse_fo_master_uploaded', JSON.stringify(parsed));
+          showToast(`✅ Loaded ${parsed.length} instruments from "${file.name}"`, 'success');
+
+          // Refresh status
+          const status = $('#fo-master-status');
+          if (status) status.textContent = `Custom F&O Master: ${parsed.length} instruments loaded from "${file.name}"`;
+
+          // Refresh datalist
+          setupNewTradeForm();
+        } catch (err) {
+          console.error(err);
+          showToast('Failed to parse Excel file: ' + err.message, 'error');
+        }
+      };
+      reader.readAsBinaryString(file);
+      foUpload.value = '';
+    });
+  }
+
+  // Auth Button Listeners
+  if ($('#btn-login-submit')) {
+    $('#btn-login-submit').onclick = async () => {
+      const u = $('#auth-user').value;
+      const p = $('#auth-pass').value;
+      if (!u || !p) return;
+      try {
+        await Auth.login(u, p);
+        await store.load();
+        renderAll();
+      } catch (e) {
+        const errEl = $('#auth-error');
+        errEl.classList.remove('hidden');
+        $('#auth-error-msg').textContent = e.message;
+      }
+    };
+  }
+  if ($('#btn-signup-submit')) {
+    $('#btn-signup-submit').onclick = async () => {
+      const u = $('#auth-user').value;
+      const p = $('#auth-pass').value;
+      if (!u || !p) return;
+      try {
+        await Auth.signup(u, p);
+        showToast('Account created! Please login.', 'success');
+      } catch (e) {
+        const errEl = $('#auth-error');
+        errEl.classList.remove('hidden');
+        $('#auth-error-msg').textContent = e.message;
+      }
+    };
+  }
+  const btnLogout = $('#btn-logout');
+  if (btnLogout) {
+    btnLogout.onclick = () => Auth.logout();
+  }
+  const btnDeleteAccount = $('#btn-delete-account');
+  if (btnDeleteAccount) {
+    btnDeleteAccount.onclick = async () => {
+      if (await showConfirm('Are you sure you want to permanently delete your account and all associated data? This cannot be undone.')) {
+        try {
+          await Auth.deleteAccount();
+        } catch (e) {
+          showToast(e.message, 'error');
+        }
+      }
+    };
+  }
+
+  // Show F&O master status on init
+  const foStatus = $('#fo-master-status');
+  if (foStatus) {
+    const uploaded = localStorage.getItem('nse_fo_master_uploaded');
+    if (uploaded) {
+      const list = JSON.parse(uploaded);
+      foStatus.textContent = `Custom F&O Master: ${list.length} instruments loaded`;
+    } else {
+      foStatus.textContent = `Using bundled default (${DEFAULT_NSE_MASTER.length} instruments). Upload your own .xlsx to override.`;
+    }
+  }
 }
 
 // Direction toggle
@@ -1457,6 +2382,196 @@ if ($('#pnl-filter-clear')) {
     $('#pnl-filter-period').value = 'all';
     UI.renderPNL();
   };
+}
+
+// Trades Filter listeners
+['filter-instrument'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('keyup', () => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }));
+});
+['filter-system', 'filter-period', 'filter-status', 'filter-direction'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }));
+});
+['filter-date-from', 'filter-date-to'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); }));
+});
+if ($('#btn-refresh')) {
+  $('#btn-refresh').onclick = () => UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); });
+}
+if ($('#btn-trades-clear')) {
+  $('#btn-trades-clear').onclick = () => {
+    ['filter-instrument', 'filter-system'].forEach(id => { if ($('#' + id)) $('#' + id).value = ''; });
+    if ($('#filter-period')) $('#filter-period').value = 'all';
+    if ($('#filter-status')) $('#filter-status').value = '';
+    if ($('#filter-direction')) $('#filter-direction').value = '';
+    if ($('#filter-date-from')) { $('#filter-date-from').value = ''; $('#filter-date-from').classList.add('hidden'); }
+    if ($('#filter-date-to')) { $('#filter-date-to').value = ''; $('#filter-date-to').classList.add('hidden'); }
+    UI.renderTrades((trd) => { editingTradeId = trd.id; $('.tab-btn[data-tab="newtrade"]').click(); fillTradeForm(trd); });
+  };
+}
+
+// ==========================================
+// EXCEL EXPORT UTILITY (SheetJS)
+// ==========================================
+function exportTableToExcel(tableId, filename) {
+  const table = document.getElementById(tableId);
+  if (!table) return showToast('Table not found', 'error');
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.table_to_sheet(table, { raw: false });
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+  XLSX.writeFile(wb, filename + '.xlsx');
+  showToast('📥 Excel downloaded: ' + filename + '.xlsx', 'success');
+}
+
+// Trades Excel Export
+if ($('#btn-export-trades-xlsx')) {
+  $('#btn-export-trades-xlsx').onclick = () => exportTableToExcel('trades-table', 'Trades_Export_' + Calc.nowDate());
+}
+// PnL Excel Export
+if ($('#btn-export-pnl-xlsx')) {
+  $('#btn-export-pnl-xlsx').onclick = () => {
+    // Build a combined table from open + closed PnL tables
+    const wb = XLSX.utils.book_new();
+    const openTable = document.getElementById('pnl-open');
+    const closedTable = document.getElementById('pnl-closed');
+    if (openTable) {
+      const ws1 = XLSX.utils.table_to_sheet(openTable.closest('table'), { raw: false });
+      XLSX.utils.book_append_sheet(wb, ws1, 'Open Positions');
+    }
+    if (closedTable) {
+      const ws2 = XLSX.utils.table_to_sheet(closedTable.closest('table'), { raw: false });
+      XLSX.utils.book_append_sheet(wb, ws2, 'Closed Positions');
+    }
+    XLSX.writeFile(wb, 'PnL_Export_' + Calc.nowDate() + '.xlsx');
+    showToast('📥 PnL Excel downloaded', 'success');
+  };
+}
+
+// Keyboard Shortcuts
+window.addEventListener('keydown', (e) => {
+  // Global Shortcuts (Alt + Key)
+  if (e.altKey) {
+    switch (e.key.toLowerCase()) {
+      case 'n':
+        e.preventDefault();
+        const tabN = document.querySelector('.tab-btn[data-tab="newtrade"]');
+        if (tabN) tabN.click();
+        break;
+      case 'd':
+        e.preventDefault();
+        const tabD = document.querySelector('.tab-btn[data-tab="dashboard"]');
+        if (tabD) tabD.click();
+        break;
+      case 't':
+        e.preventDefault();
+        const tabT = document.querySelector('.tab-btn[data-tab="trades"]');
+        if (tabT) tabT.click();
+        break;
+      case 'p':
+        e.preventDefault();
+        const tabP = document.querySelector('.tab-btn[data-tab="pnl"]');
+        if (tabP) tabP.click();
+        break;
+      case 's':
+        e.preventDefault();
+        if ($('#view-newtrade') && !$('#view-newtrade').classList.contains('hidden')) {
+          $('#save-trade').click();
+        }
+        break;
+    }
+  }
+  if (e.key === 'Escape') {
+    // Reset form if in new trade
+    if ($('#view-newtrade') && !$('#view-newtrade').classList.contains('hidden')) {
+      $('#reset-trade').click();
+    }
+    // Close search results
+    if ($('#inst-results')) $('#inst-results').classList.add('hidden');
+  }
+});
+
+// Admin Dashboard
+async function fetchAdminUsers() {
+  const tbody = document.getElementById('admin-users-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-gray-400">Loading accounts...</td></tr>';
+
+  try {
+    const res = await fetch('/api/admin/users');
+    if (!res.ok) {
+      tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Failed to load users (' + res.status + ')</td></tr>';
+      return;
+    }
+    const data = await res.json();
+    if (!data.users || data.users.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-gray-400">No users found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = '';
+    data.users.forEach(u => {
+      const tr = document.createElement('tr');
+      // Format uuid to visual short uuid like in check_ownership script
+      const shortId = u.id.substring(0, 8) + '...';
+      const isSelf = u.username === store.state.username;
+      tr.innerHTML = `
+        <td class="p-3 text-gray-600 font-mono text-xs">${shortId}</td>
+        <td class="p-3 font-medium ${isSelf ? 'text-indigo-600 font-bold' : ''}">${u.username} ${isSelf ? '(You)' : ''}</td>
+        <td class="p-3 text-gray-500">${u.trades}</td>
+        <td class="p-3 text-gray-500">${u.systems}</td>
+        <td class="p-3 space-x-2">
+            <button onclick="adminChangePassword('${u.id}', '${u.username}')" class="px-2 py-1 text-xs bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 font-medium">Change Pass</button>
+            ${!isSelf ? `<button onclick="adminDeleteUser('${u.id}', '${u.username}')" class="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium tracking-wide">Delete</button>` : ''}
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-red-500">Network error fetching users</td></tr>';
+  }
+}
+
+async function adminDeleteUser(targetId, targetUsername) {
+  if (await showConfirm(`Are you sure you want to permanently delete user "${targetUsername}" and all their data?`)) {
+    try {
+      const res = await fetch('/api/admin/delete_user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_user_id: targetId })
+      });
+      if (res.ok) {
+        showToast(`User ${targetUsername} deleted.`, 'success');
+        fetchAdminUsers();
+      } else {
+        showToast('Failed to delete user.', 'error');
+      }
+    } catch (e) {
+      showToast('Network error', 'error');
+    }
+  }
+}
+
+async function adminChangePassword(targetId, targetUsername) {
+  const newPass = prompt(`Enter new password for user "${targetUsername}":`);
+  if (!newPass || newPass.trim() === '') return;
+
+  try {
+    const res = await fetch('/api/admin/change_password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_user_id: targetId, new_password: newPass })
+    });
+    if (res.ok) {
+      showToast(`Password for ${targetUsername} updated successfully.`, 'success');
+    } else {
+      showToast('Failed to update password.', 'error');
+    }
+  } catch (e) {
+    showToast('Network error', 'error');
+  }
 }
 
 // Start
